@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# PLTR Signal Desk launcher.  Run it with:   ./pltr
+# First run creates a virtual env and installs deps; later runs just start the server.
+cd "$(dirname "$0")"
+
+if [ ! -d .venv ]; then
+  echo "First run: setting up (creating .venv, installing dependencies)…"
+  python3 -m venv .venv || { echo "python3 not found — run: xcode-select --install"; exit 1; }
+  ./.venv/bin/pip install -q --upgrade pip
+  ./.venv/bin/pip install -q -r requirements.txt
+fi
+
+# load .env if present (ANTHROPIC_API_KEY, X_BEARER_TOKEN, PORT, …)
+[ -f .env ] && set -a && . ./.env && set +a
+PORT="${PORT:-8000}"
+
+IP=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || hostname -I 2>/dev/null | awk '{print $1}' || echo "")
+echo ""
+echo "=================================================="
+echo "  PLTR Signal Desk"
+echo "  This Mac:      http://localhost:$PORT"
+[ -n "$IP" ] && echo "  Your network:  http://$IP:$PORT   (phone / other laptop)"
+echo "  Stop: press Ctrl+C"
+echo "=================================================="
+echo ""
+exec ./.venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port "$PORT"

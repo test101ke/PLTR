@@ -1,0 +1,31 @@
+services:
+  - type: web
+    name: pltr-signal-desk
+    runtime: python
+    plan: starter            # "free" also works but sleeps when idle (cold starts)
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.6"
+      - key: ANTHROPIC_API_KEY   # enables the AI news/signal agent
+        sync: false
+      - key: AI_MODEL
+        value: claude-3-5-haiku-latest
+      - key: X_BEARER_TOKEN      # optional: X/Twitter buzz
+        sync: false
+      - key: LARGE_TRADE_USD
+        value: "3000"
+      - key: FAST_INTERVAL
+        value: "2"
+      - key: STOCK_INTERVAL
+        value: "30"
+      - key: AGENT_INTERVAL
+        value: "300"
+      # Optional overrides if auto-discovery ever misses the symbol:
+      # - key: BYBIT_SYMBOL
+      #   value: PLTRXUSDT
+      # - key: KRAKEN_PAIR
+      #   value: PLTRXUSD
