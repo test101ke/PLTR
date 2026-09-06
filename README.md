@@ -36,10 +36,12 @@ New → **Web Service** → connect repo →
 
 ## Run locally (access by localhost or LAN IP)
 
-**Easiest — one command:**
+**Easiest — one word:**
 ```bash
-bash run_local.sh          # Mac/Linux  (or double-click run_local.command on a Mac)
+cd ~/Documents/Claude/Projects/pltr-signal-desk
+./pltr
 ```
+First run sets up the virtual env and installs everything; later runs just start it. (Same thing: `bash run_local.sh`, or double-click `run_local.command` on a Mac.)
 ```bat
 run_local.bat              REM Windows
 ```
