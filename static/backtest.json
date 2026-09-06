@@ -1,0 +1,256 @@
+{
+  "generatedAt": "2026-09-06T07:02:55.543407+00:00",
+  "source": "binance-perp:PLTRUSDT",
+  "venue": "binance-perp",
+  "symbol": "PLTRUSDT",
+  "nDays": 149,
+  "signalMin": 2,
+  "windowMin": 15,
+  "dateRange": [
+    "2026-02-10",
+    "2026-09-04"
+  ],
+  "notes": [
+    "Best out-of-sample rule: 'Momentum: first-2min move > 0.2% continues' \u2014 64% on 39 held-out days (95% floor 48%, p=0.0782). Does NOT clear a trustworthy 70% out-of-sample. Treat as no reliable edge yet.",
+    "Source: binance-perp contract PLTRUSDT. Tested 12 rules; the out-of-sample figure is the honest one.",
+    "Gross of fees/slippage; these contracts can be thin at the open \u2014 model real fills before automating."
+  ],
+  "rules": [
+    {
+      "name": "Momentum: first-2min move > 0.0% continues",
+      "param": 0.0,
+      "trainHit": 0.49,
+      "nTrain": 102,
+      "testHit": 0.622,
+      "nTest": 45,
+      "ciLow": 0.476,
+      "p": 0.1011,
+      "expectancy": 0.146
+    },
+    {
+      "name": "Momentum: first-2min move > 0.1% continues",
+      "param": 0.001,
+      "trainHit": 0.489,
+      "nTrain": 92,
+      "testHit": 0.628,
+      "nTest": 43,
+      "ciLow": 0.479,
+      "p": 0.0934,
+      "expectancy": 0.148
+    },
+    {
+      "name": "Momentum: first-2min move > 0.2% continues",
+      "param": 0.002,
+      "trainHit": 0.506,
+      "nTrain": 85,
+      "testHit": 0.641,
+      "nTest": 39,
+      "ciLow": 0.484,
+      "p": 0.0782,
+      "expectancy": 0.167
+    },
+    {
+      "name": "Momentum: first-2min move > 0.3% continues",
+      "param": 0.003,
+      "trainHit": 0.513,
+      "nTrain": 76,
+      "testHit": 0.636,
+      "nTest": 33,
+      "ciLow": 0.466,
+      "p": 0.1172,
+      "expectancy": 0.24
+    },
+    {
+      "name": "Momentum: first-2min move > 0.5% continues",
+      "param": 0.005,
+      "trainHit": 0.516,
+      "nTrain": 62,
+      "testHit": 0.667,
+      "nTest": 24,
+      "ciLow": 0.467,
+      "p": 0.1025,
+      "expectancy": 0.3
+    },
+    {
+      "name": "Momentum: first-2min move > 0.8% continues",
+      "param": 0.008,
+      "trainHit": 0.476,
+      "nTrain": 42,
+      "testHit": 0.7,
+      "nTest": 20,
+      "ciLow": 0.481,
+      "p": 0.0736,
+      "expectancy": 0.474
+    },
+    {
+      "name": "Gap fade: fade gap > 0.2%",
+      "param": 0.002,
+      "trainHit": null,
+      "nTrain": 0,
+      "testHit": null,
+      "nTest": 0,
+      "ciLow": 0.0,
+      "p": 1.0,
+      "expectancy": 0.0
+    },
+    {
+      "name": "Gap fade: fade gap > 0.5%",
+      "param": 0.005,
+      "trainHit": null,
+      "nTrain": 0,
+      "testHit": null,
+      "nTest": 0,
+      "ciLow": 0.0,
+      "p": 1.0,
+      "expectancy": 0.0
+    },
+    {
+      "name": "Gap fade: fade gap > 1.0%",
+      "param": 0.01,
+      "trainHit": null,
+      "nTrain": 0,
+      "testHit": null,
+      "nTest": 0,
+      "ciLow": 0.0,
+      "p": 1.0,
+      "expectancy": 0.0
+    },
+    {
+      "name": "Gap-and-go: follow gap > 0.5%",
+      "param": 0.005,
+      "trainHit": null,
+      "nTrain": 0,
+      "testHit": null,
+      "nTest": 0,
+      "ciLow": 0.0,
+      "p": 1.0,
+      "expectancy": 0.0
+    },
+    {
+      "name": "Gap-and-go: follow gap > 1.0%",
+      "param": 0.01,
+      "trainHit": null,
+      "nTrain": 0,
+      "testHit": null,
+      "nTest": 0,
+      "ciLow": 0.0,
+      "p": 1.0,
+      "expectancy": 0.0
+    },
+    {
+      "name": "Logistic reg [gap, r_sig, range, vol]",
+      "param": null,
+      "trainHit": null,
+      "nTrain": 104,
+      "testHit": 0.578,
+      "nTest": 45,
+      "ciLow": 0.433,
+      "p": 0.2967,
+      "expectancy": null
+    }
+  ],
+  "minuteProfile": [
+    {
+      "m": 1,
+      "avgAbs": 0.004739418058865373,
+      "avgSigned": -0.0008757194478757123,
+      "upShare": 0.3691275167785235
+    },
+    {
+      "m": 2,
+      "avgAbs": 0.00376517169467005,
+      "avgSigned": -4.36167580362902e-05,
+      "upShare": 0.5033557046979866
+    },
+    {
+      "m": 3,
+      "avgAbs": 0.00314350538132918,
+      "avgSigned": -0.00011348623452159536,
+      "upShare": 0.46308724832214765
+    },
+    {
+      "m": 4,
+      "avgAbs": 0.002838891542716763,
+      "avgSigned": -0.00019309740603239153,
+      "upShare": 0.4697986577181208
+    },
+    {
+      "m": 5,
+      "avgAbs": 0.002811514894852696,
+      "avgSigned": 0.0005572968856758934,
+      "upShare": 0.5704697986577181
+    },
+    {
+      "m": 6,
+      "avgAbs": 0.0027014916433332503,
+      "avgSigned": 8.607068183846786e-05,
+      "upShare": 0.46308724832214765
+    },
+    {
+      "m": 7,
+      "avgAbs": 0.002165912856161636,
+      "avgSigned": 0.00039752696447464705,
+      "upShare": 0.5503355704697986
+    },
+    {
+      "m": 8,
+      "avgAbs": 0.0022782913454262163,
+      "avgSigned": 0.00013315628753525033,
+      "upShare": 0.5234899328859061
+    },
+    {
+      "m": 9,
+      "avgAbs": 0.002252641281301801,
+      "avgSigned": -0.00016763510704238731,
+      "upShare": 0.4697986577181208
+    },
+    {
+      "m": 10,
+      "avgAbs": 0.0022537397628594924,
+      "avgSigned": 0.0002491278025534875,
+      "upShare": 0.4899328859060403
+    },
+    {
+      "m": 11,
+      "avgAbs": 0.0021439457576132594,
+      "avgSigned": 0.00016360309819172977,
+      "upShare": 0.5234899328859061
+    },
+    {
+      "m": 12,
+      "avgAbs": 0.0019686513945645174,
+      "avgSigned": -2.8396531157907995e-05,
+      "upShare": 0.46308724832214765
+    },
+    {
+      "m": 13,
+      "avgAbs": 0.0020894684998134534,
+      "avgSigned": 0.0002355025223687337,
+      "upShare": 0.5302013422818792
+    },
+    {
+      "m": 14,
+      "avgAbs": 0.0019251111757530733,
+      "avgSigned": 0.00020098315315817466,
+      "upShare": 0.5033557046979866
+    },
+    {
+      "m": 15,
+      "avgAbs": 0.0024314133029304293,
+      "avgSigned": 0.0003769237286892684,
+      "upShare": 0.5771812080536913
+    }
+  ],
+  "best": {
+    "name": "Momentum: first-2min move > 0.2% continues",
+    "param": 0.002,
+    "trainHit": 0.506,
+    "nTrain": 85,
+    "testHit": 0.641,
+    "nTest": 39,
+    "ciLow": 0.484,
+    "p": 0.0782,
+    "expectancy": 0.167
+  },
+  "passed70": false
+}
