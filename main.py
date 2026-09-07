@@ -35,6 +35,7 @@ from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 import backtest as bt
 import exchanges as ex
+import amd as amdlib
 
 # ---------------------------------------------------------------- config
 CFG = {
@@ -65,6 +66,7 @@ STATE: dict[str, Any] = {
     "agent": {},      # AI thesis + sentiment
     "signal": {},     # composite call
     "backtest": {},   # open-window edge study
+    "amd": {},        # AMD / Power-of-3 summary (full payload at /api/amd)
 }
 _LOCK = asyncio.Lock()
 _client: Optional[httpx.AsyncClient] = None
@@ -72,6 +74,7 @@ _client: Optional[httpx.AsyncClient] = None
 from collections import deque
 _LIVE = deque(maxlen=1400)   # (epoch_seconds, mark_price) for short-timeframe signals
 _ROT = {"i": 0, "live": []}  # rotating exchange price pool
+AMD = {}                     # full AMD / Power-of-3 payload (served at /api/amd)
 
 
 def now_iso() -> str:
@@ -592,6 +595,26 @@ def keyword_dir(text: str) -> str:
     return "up" if p > n else "down" if n > p else "flat"
 
 
+async def poll_amd():
+    """AMD / Power-of-3 read on the tokenized PLTR 24h series (Asia/London/NY)."""
+    order = [STATE["meta"].get("depthVenue")] + list(_ROT["live"])
+    order = list(dict.fromkeys([o for o in order if o]))
+    venue, rows = await ex.ohlc_any(_client, order, "5m", 300)
+    if not rows:
+        async with _LOCK:
+            STATE["meta"]["errors"]["amd"] = "no intraday candles available"
+        return
+    res = amdlib.compute(rows, venue=venue, symbol=ex._SYM.get(venue))
+    async with _LOCK:
+        AMD.clear(); AMD.update(res)
+        STATE["amd"] = {k: res.get(k) for k in
+                        ("ok", "phase", "phaseLabel", "bias", "swept", "reclaimed",
+                         "expanded", "status", "asiaHigh", "asiaLow", "levels", "venue", "symbol")}
+        STATE["meta"]["amdAsOf"] = now_iso()
+        STATE["meta"]["errors"].pop("amd", None)
+    recompute_signal()
+
+
 async def run_backtest_job():
     days = int(os.getenv("BT_DAYS", "200"))
     res = await bt.run_backtest(days=days)
@@ -771,6 +794,14 @@ def recompute_signal():
         factors.append(["News sentiment", "u" if v > 0 else "d" if v < 0 else "f",
                         f"net {net:+d}"])
 
+    # 6) AMD / Power-of-3 session model
+    am = STATE.get("amd") or {}
+    if am.get("ok") and am.get("bias") in ("bullish", "bearish"):
+        v = (1.0 if am["bias"] == "bullish" else -1.0) * (1.0 if am.get("reclaimed") else 0.4)
+        score += v
+        factors.append(["AMD (Power of 3)", "u" if v > 0 else "d",
+                        f"{am.get('swept')}-sweep · {'reclaimed' if am.get('reclaimed') else 'unconfirmed'}"])
+
     # map score -> call
     if score >= 3.5:
         word, cls, bias = "STRONG BUY", "buy", "Momentum, trend and flow aligned to the upside"
@@ -828,6 +859,7 @@ async def lifespan(app: FastAPI):
     await rotate_price()
     await run_news()
     await run_agent()
+    await poll_amd()
     bt_interval = float(os.getenv("BT_INTERVAL", "86400"))
     tasks = [
         asyncio.create_task(loop(rotate_price, CFG["FAST_INTERVAL"], "price")),
@@ -835,6 +867,7 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(loop(poll_stock, CFG["STOCK_INTERVAL"], "stock")),
         asyncio.create_task(loop(run_news, CFG["NEWS_INTERVAL"], "news")),
         asyncio.create_task(loop(run_agent, CFG["AGENT_INTERVAL"], "agent")),
+        asyncio.create_task(loop(poll_amd, float(os.getenv("AMD_INTERVAL", "60")), "amd")),
         asyncio.create_task(loop(run_backtest_job, bt_interval, "backtest")),
     ]
     try:
@@ -852,6 +885,12 @@ app = FastAPI(title="PLTR Signal Desk", lifespan=lifespan)
 async def api_state():
     async with _LOCK:
         return JSONResponse(json.loads(json.dumps(STATE, default=str)))
+
+
+@app.get("/api/amd")
+async def api_amd():
+    async with _LOCK:
+        return JSONResponse(json.loads(json.dumps(AMD, default=str)))
 
 
 @app.get("/api/backtest")

@@ -393,3 +393,63 @@ async def resolve_depth(client, live_names):
             if b and (b["bids"] or b["asks"]):
                 return name
     return None
+
+
+# ============================================================ OHLC (for session models)
+async def ohlc(client, name, interval="5m", limit=300):
+    """Return [{'t':ms,'o','h','l','c','v'}] oldest->newest for a venue, or []."""
+    sym = _SYM.get(name)
+    if not sym:
+        return []
+    def row(t, o, h, l, c, v):
+        t = int(t)
+        return {"t": t if t > 1e12 else t * 1000, "o": _f(o), "h": _f(h), "l": _f(l), "c": _f(c), "v": _f(v) or 0}
+    try:
+        if name == "binance-perp":
+            j = await _gj(client, f"https://fapi.binance.com/fapi/v1/klines?symbol={sym}&interval={interval}&limit={limit}")
+            return [row(r[0], r[1], r[2], r[3], r[4], r[5]) for r in j] if isinstance(j, list) else []
+        if name == "okx-swap":
+            j = await _gj(client, f"https://www.okx.com/api/v5/market/candles?instId={sym}&bar={interval}&limit={min(limit,300)}")
+            return [row(r[0], r[1], r[2], r[3], r[4], r[5]) for r in reversed(j.get("data", []))]
+        if name == "bitget-perp":
+            j = await _gj(client, f"https://api.bitget.com/api/v2/mix/market/candles?symbol={sym}&productType=usdt-futures&granularity={interval}&limit={limit}")
+            return [row(r[0], r[1], r[2], r[3], r[4], r[5]) for r in j.get("data", [])]
+        if name == "gate-perp":
+            j = await _gj(client, f"https://api.gateio.ws/api/v4/futures/usdt/candlesticks?contract={sym}&interval={interval}&limit={limit}")
+            return [row(r["t"], r["o"], r["h"], r["l"], r["c"], r.get("v", 0)) for r in j] if isinstance(j, list) else []
+        if name == "gate-spot":
+            j = await _gj(client, f"https://api.gateio.ws/api/v4/spot/candlesticks?currency_pair={sym}&interval={interval}&limit={limit}")
+            # gate spot rows: [t, quoteVol, close, high, low, open, baseVol, ...]
+            return [row(r[0], r[5], r[3], r[4], r[2], r[6] if len(r) > 6 else 0) for r in j] if isinstance(j, list) else []
+        if name == "mexc-perp":
+            iv = {"1m": "Min1", "5m": "Min5", "15m": "Min15"}.get(interval, "Min5")
+            j = await _gj(client, f"https://contract.mexc.com/api/v1/contract/kline/{sym}?interval={iv}")
+            d = j.get("data") or {}
+            ts, op, hi, lo, cl = d.get("time", []), d.get("open", []), d.get("high", []), d.get("low", []), d.get("close", [])
+            vo = d.get("vol", [0] * len(ts))
+            return [row(ts[i], op[i], hi[i], lo[i], cl[i], vo[i] if i < len(vo) else 0) for i in range(len(ts))][-limit:]
+        if name == "kucoin-perp":
+            import time as _t
+            gran = {"1m": 1, "5m": 5, "15m": 15}.get(interval, 5)
+            to = int(_t.time() * 1000); frm = to - limit * gran * 60000
+            j = await _gj(client, f"https://api-futures.kucoin.com/api/v1/kline/query?symbol={sym}&granularity={gran}&from={frm}&to={to}")
+            return [row(r[0], r[1], r[2], r[3], r[4], r[5] if len(r) > 5 else 0) for r in j.get("data", [])]
+        if name in ("bybit-perp", "bybit-spot"):
+            cat = "linear" if name == "bybit-perp" else "spot"
+            iv = {"1m": "1", "5m": "5", "15m": "15"}.get(interval, "5")
+            j = await _gj(client, f"https://api.bybit.com/v5/market/kline?category={cat}&symbol={sym}&interval={iv}&limit={min(limit,1000)}")
+            rows = j.get("result", {}).get("list", [])
+            return [row(r[0], r[1], r[2], r[3], r[4], r[5]) for r in sorted(rows, key=lambda x: int(x[0]))]
+    except Exception:
+        return []
+    return []
+
+
+async def ohlc_any(client, names, interval="5m", limit=300):
+    """First venue in `names` that returns a usable candle series."""
+    for n in names:
+        rows = await ohlc(client, n, interval, limit)
+        rows = [r for r in rows if r["c"]]
+        if len(rows) >= 30:
+            return n, rows
+    return None, []

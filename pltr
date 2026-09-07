@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 # PLTR Signal Desk launcher.  Run it with:   ./pltr
 # First run creates a virtual env and installs deps; later runs just start the server.
+#
+# Hosting:
+#   ./pltr                     -> binds 0.0.0.0 (reachable on every IP this machine has)
+#   PORT=9000 ./pltr           -> different port
+#   HOST=192.168.1.50 ./pltr   -> bind one specific IP only
 cd "$(dirname "$0")"
 
 if [ ! -d .venv ]; then
@@ -10,17 +15,26 @@ if [ ! -d .venv ]; then
   ./.venv/bin/pip install -q -r requirements.txt
 fi
 
-# load .env if present (ANTHROPIC_API_KEY, X_BEARER_TOKEN, PORT, …)
 [ -f .env ] && set -a && . ./.env && set +a
 PORT="${PORT:-8000}"
+HOST="${HOST:-0.0.0.0}"
 
-IP=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || hostname -I 2>/dev/null | awk '{print $1}' || echo "")
+# every IPv4 this machine answers on
+IPS=$( { ipconfig getifaddr en0; ipconfig getifaddr en1; \
+         ifconfig 2>/dev/null | awk '/inet /{print $2}'; \
+         hostname -I 2>/dev/null | tr ' ' '\n'; } 2>/dev/null \
+       | grep -E '^[0-9]+\.' | grep -v '^127\.' | sort -u )
+
 echo ""
 echo "=================================================="
-echo "  PLTR Signal Desk"
-echo "  This Mac:      http://localhost:$PORT"
-[ -n "$IP" ] && echo "  Your network:  http://$IP:$PORT   (phone / other laptop)"
-echo "  Stop: press Ctrl+C"
+echo "  PLTR Signal Desk  —  host $HOST : port $PORT"
+echo "  This machine:   http://localhost:$PORT"
+for ip in $IPS; do echo "  On your network: http://$ip:$PORT"; done
+echo ""
+echo "  To reach it from outside your network, forward port"
+echo "  $PORT on your router to this machine, or run a tunnel"
+echo "  (e.g. cloudflared tunnel --url http://localhost:$PORT)."
+echo "  Stop: Ctrl+C"
 echo "=================================================="
 echo ""
-exec ./.venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port "$PORT"
+exec ./.venv/bin/python -m uvicorn main:app --host "$HOST" --port "$PORT"

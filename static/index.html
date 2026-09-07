@@ -270,6 +270,7 @@ img{max-width:100%}
         <button class="tab" role="tab" aria-selected="false" aria-controls="p-fund" id="t-fund">Fundamentals</button>
         <button class="tab" role="tab" aria-selected="false" aria-controls="p-proj" id="t-proj">Projection</button>
         <button class="tab" role="tab" aria-selected="false" aria-controls="p-edge" id="t-edge">Open-window edge</button>
+        <button class="tab" role="tab" aria-selected="false" aria-controls="p-amd" id="t-amd">AMD · Power of 3</button>
       </div>
 
       <!-- LIVE MARKET -->
@@ -337,6 +338,18 @@ img{max-width:100%}
         <h3 class="mt">Read &amp; caveats</h3>
         <div id="btNotes"></div>
       </section>
+
+      <!-- AMD / POWER OF 3 -->
+      <section class="panel glass" role="tabpanel" id="p-amd" aria-labelledby="t-amd" hidden>
+        <div id="amdBanner"></div>
+        <h3 class="mt">PLTR price movement — Asia / London / New York</h3>
+        <svg class="chart" id="amdChart" viewBox="0 0 720 340" preserveAspectRatio="xMidYMid meet" role="img" aria-label="AMD session chart"></svg>
+        <div class="chart-foot"><div class="legend" id="amdLegend"></div><span id="amdMeta"></span></div>
+        <div id="amdProj" class="tiles" style="margin-top:12px"></div>
+        <h3 class="mt">Levels</h3>
+        <div class="rows" id="amdLevels"></div>
+        <p class="note" id="amdNote"></p>
+      </section>
     </main>
 
     <aside class="rail">
@@ -376,7 +389,7 @@ let lastPx=null, tokLast=null, liveSeries=[];
   b.onclick=()=>{const c=root.getAttribute("data-theme");const d=c?c==="dark":false;
     const n=d?"light":"dark";root.setAttribute("data-theme",n);try{localStorage.setItem("pltr-theme",n);}catch(e){}};})();
 
-(function(){const tabs=$$(".tab"),map={"t-live":"p-live","t-over":"p-over","t-fund":"p-fund","t-proj":"p-proj","t-edge":"p-edge"};
+(function(){const tabs=$$(".tab"),map={"t-live":"p-live","t-over":"p-over","t-fund":"p-fund","t-proj":"p-proj","t-edge":"p-edge","t-amd":"p-amd"};
   $$(".panel").forEach(p=>p.hidden=false);           // one-pager: every panel visible, tabs just jump
   tabs.forEach(t=>t.onclick=()=>{const el=$("#"+map[t.id]);if(el)el.scrollIntoView({behavior:"smooth",block:"start"});});
   const byPanel={};Object.entries(map).forEach(([tb,pn])=>byPanel[pn]=tb);
@@ -563,6 +576,94 @@ function renderBacktest(bt){
 function esc(s){return(s||"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
 function fmtPub(p){if(!p)return"";const t=Date.parse(p);return isNaN(t)?"":ago(t)+" ago";}
 
+
+/* ---------- AMD / Power of 3 ---------- */
+let AMDDATA=null;
+async function pullAmd(){try{const r=await fetch("/api/amd",{cache:"no-store"});AMDDATA=await r.json();renderAmd(AMDDATA);}catch(e){}}
+function renderAmd(a){
+  const B=$("#amdBanner"),L=$("#amdLevels"),N=$("#amdNote"),M=$("#amdMeta");
+  if(!B)return;
+  if(!a||!a.ok){B.innerHTML=`<div class="verdict fail">AMD model warming up<small>${esc((a&&a.note)||"waiting on 24h candle history from the exchange pool")}</small></div>`;
+    $("#amdChart").innerHTML="";L.innerHTML="";return;}
+  B.innerHTML=`<div class="verdict ${a.bias==="bullish"?"pass":"fail"}">${esc(a.phaseLabel)} · ${a.bias==="none"?"no bias yet":esc(a.bias.toUpperCase())+" bias"}<small>${esc(a.status)}</small></div>`;
+  drawAmdChart(a);
+  const lv=a.levels;
+  L.innerHTML=[
+    ["Asia high",money(a.asiaHigh),"range top","flat"],
+    ["Asia low",money(a.asiaLow),"range bottom","flat"],
+    ["Range size",money(a.range),"","flat"],
+    ...(a.swept?[[`Sweep (${a.swept})`,money(a.sweepPx),a.reclaimed?"reclaimed":"not reclaimed",a.reclaimed?"up":"down"]]:[]),
+    ...(lv?[["Entry",money(lv.entry),lv.side,lv.side==="long"?"up":"down"],
+           ["Invalidation",money(lv.stop),"risk "+money(lv.risk),"down"],
+           ["Target 1",money(lv.t1),(lv.rr1!=null?lv.rr1+"R":""),"up"],
+           ["Target 2",money(lv.t2),(lv.rr2!=null?lv.rr2+"R":""),"up"]]:[])
+  ].map(r=>`<div class="row"><span class="k">${r[0]}</span><span class="v mono">${r[1]}${r[2]?`<span class="tag2 ${r[3]}">${r[2]}</span>`:""}</span></div>`).join("");
+  const P=a.projection||{};
+  const pj=$("#amdProj");
+  if(pj){
+    const t=[];
+    if(P.up)t.push(["Potential upside",money(P.up.t1),(P.upPct!=null&&P.upPct>=0?"+":"")+(P.upPct!=null?P.upPct+"%":"")+" · ext "+money(P.up.t2),"up"]);
+    if(P.down)t.push(["Potential downside",money(P.down.t1),(P.downPct!=null?P.downPct+"%":"")+" · ext "+money(P.down.t2),"down"]);
+    if(P.invalid!=null)t.push(["Invalidation",money(P.invalid),"model wrong beyond here","down"]);
+    t.push(["Model state",P.mode==="directional"?"Directional":"Both sides live",P.mode==="directional"?(P.bias||""):"awaiting sweep",""]);
+    pj.innerHTML=t.map(r=>`<div class="tile glass-inset"><div class="k">${r[0]}</div><div class="v ${r[3]} mono">${r[1]}</div><div class="x">${r[2]}</div></div>`).join("");
+  }
+  M.textContent=`${a.venue||""} ${a.symbol||""} · 5m candles · ${a.day||""}`;
+  N.innerHTML=`<b>How to read it:</b> Asia builds the range (blue) — that high and low are the liquidity. London sweeps one side to trap traders (red): a sweep of the <b>low</b> is bullish, of the <b>high</b> bearish. New York expands in the true direction (green). The setup only counts once price <b>reclaims</b> back inside the range after the sweep — entry there, invalidation beyond the sweep, first target the opposite side of the range. Runs on the tokenized PLTR perp, the only PLTR market that trades through Asia and London.`;
+}
+function drawAmdChart(a){
+  const cs=a.candles||[];
+  const W=720,H=340,padL=48,padR=66,padT=18,padB=26;
+  const t0=a.dayStart||(cs[0]&&cs[0].t), tN=a.dayEnd||(cs.length&&cs[cs.length-1].t);
+  if(!t0||!tN){$("#amdChart").innerHTML="";return;}
+  const span=(tN-t0)||1, P=a.projection||{}, now=a.nowMs||tN;
+  let vals=[]; cs.forEach(c=>vals.push(c.h,c.l));
+  vals.push(a.asiaHigh,a.asiaLow); if(a.sweepPx!=null)vals.push(a.sweepPx);
+  [P.up,P.down].forEach(o=>{if(o)vals.push(o.t1,o.t2);}); if(P.invalid!=null)vals.push(P.invalid);
+  vals=vals.filter(v=>typeof v==="number"&&isFinite(v));
+  if(!vals.length){$("#amdChart").innerHTML="";return;}
+  let mn=Math.min(...vals),mx=Math.max(...vals);
+  const pd=(mx-mn)*0.08||1; mn-=pd; mx+=pd; const rg=(mx-mn)||1;
+  const x=t=>padL+((t-t0)/span)*(W-padL-padR), y=v=>padT+(1-(v-mn)/rg)*(H-padT-padB);
+  const S=a.sessions||{};
+  // session bands — always drawn, whether or not that session is currently open
+  const band=(w,col,lab)=>{if(!w)return"";
+    const x1=Math.max(padL,x(w[0])),x2=Math.min(W-padR,x(w[1])); if(x2<=x1)return"";
+    const live=now>=w[0]&&now<w[1], done=now>=w[1];
+    return `<rect x="${x1.toFixed(1)}" y="${padT}" width="${(x2-x1).toFixed(1)}" height="${H-padT-padB}" fill="${col}" opacity="${live?0.17:done?0.09:0.05}"/>`
+      +(live?`<rect x="${x1.toFixed(1)}" y="${padT}" width="${(x2-x1).toFixed(1)}" height="2.5" fill="${col}"/>`:"")
+      +`<text x="${((x1+x2)/2).toFixed(1)}" y="${padT+12}" text-anchor="middle" font-size="9.5" fill="var(--ink-3)" font-weight="700">${lab}${live?" · OPEN":done?"":" · UPCOMING"}</text>`;};
+  let g="";
+  for(let i=0;i<=4;i++){const v=mn+rg*i/4,yy=y(v);
+    g+=`<line x1="${padL}" y1="${yy.toFixed(1)}" x2="${(W-padR).toFixed(1)}" y2="${yy.toFixed(1)}" stroke="var(--grid)"/><text x="${padL-6}" y="${(yy+3.5).toFixed(1)}" text-anchor="end" font-size="10" fill="var(--ink-3)" font-family="ui-monospace,monospace">${v.toFixed(1)}</text>`;}
+  // bottom time axis in EAT
+  let ax=""; for(let t=t0;t<=tN;t+=4*3600000){const xx=x(t); if(xx<padL-1||xx>W-padR+1)continue;
+    ax+=`<text x="${xx.toFixed(1)}" y="${H-8}" text-anchor="middle" font-size="9" fill="var(--ink-3)">${new Date(t).toLocaleTimeString("en-GB",{timeZone:"Africa/Nairobi",hour:"2-digit",minute:"2-digit"})}</text>`;}
+  const cw=Math.max(1,(W-padL-padR)/Math.max(cs.length,1)*0.75); let k="";
+  cs.forEach(c=>{const cx=x(c.t); if(cx<padL||cx>W-padR)return; const up=c.c>=c.o,col=up?"var(--up)":"var(--down)";
+    const yo=y(c.o),yc=y(c.c);
+    k+=`<line x1="${cx.toFixed(1)}" y1="${y(c.h).toFixed(1)}" x2="${cx.toFixed(1)}" y2="${y(c.l).toFixed(1)}" stroke="${col}" stroke-width="0.8"/><rect x="${(cx-cw/2).toFixed(1)}" y="${Math.min(yo,yc).toFixed(1)}" width="${cw.toFixed(1)}" height="${Math.max(1,Math.abs(yc-yo)).toFixed(1)}" fill="${col}"/>`;});
+  const hl=(v,col,dash,lab)=>v==null?"":`<line x1="${padL}" y1="${y(v).toFixed(1)}" x2="${(W-padR).toFixed(1)}" y2="${y(v).toFixed(1)}" stroke="${col}" stroke-width="1.2" stroke-dasharray="${dash}"/><text x="${(W-padR-2).toFixed(1)}" y="${(y(v)-3).toFixed(1)}" text-anchor="end" font-size="9.5" fill="${col}" font-weight="700">${lab}</text>`;
+  let ln=hl(a.asiaHigh,"var(--accent)","4 3","Asia high "+money(a.asiaHigh))+hl(a.asiaLow,"var(--accent)","4 3","Asia low "+money(a.asiaLow));
+  if(a.sweepPx!=null)ln+=hl(a.sweepPx,"var(--down)","2 3","sweep "+money(a.sweepPx));
+  if(P.invalid!=null)ln+=hl(P.invalid,"var(--down)","1 3","invalid "+money(P.invalid));
+  // forward projection cones from NOW to the end of the NY session
+  const cone=(o,col)=>{if(!o||P.from==null)return"";
+    const x1=x(now),x2=W-padR,y0=y(P.from),y1=y(o.t1),y2=y(o.t2);
+    return `<polygon points="${x1.toFixed(1)},${y0.toFixed(1)} ${x2.toFixed(1)},${y1.toFixed(1)} ${x2.toFixed(1)},${y2.toFixed(1)}" fill="${col}" opacity="0.15"/>`
+      +`<line x1="${x1.toFixed(1)}" y1="${y0.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y1.toFixed(1)}" stroke="${col}" stroke-width="1.4" stroke-dasharray="5 3"/>`
+      +`<line x1="${x1.toFixed(1)}" y1="${y0.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="${col}" stroke-width="1" stroke-dasharray="2 4"/>`
+      +`<text x="${(x2+3).toFixed(1)}" y="${(y1+3).toFixed(1)}" font-size="9.5" fill="${col}" font-weight="700">${money(o.t1)}</text>`
+      +`<text x="${(x2+3).toFixed(1)}" y="${(y2+3).toFixed(1)}" font-size="9" fill="${col}">${money(o.t2)}</text>`;};
+  const cones=cone(P.up,"var(--up)")+cone(P.down,"var(--down)");
+  const nowLine=`<line x1="${x(now).toFixed(1)}" y1="${padT}" x2="${x(now).toFixed(1)}" y2="${(H-padB).toFixed(1)}" stroke="var(--ink)" stroke-width="1.2" stroke-dasharray="3 3"/><text x="${(x(now)+3).toFixed(1)}" y="${(H-padB-4).toFixed(1)}" font-size="9" fill="var(--ink-2)" font-weight="700">NOW</text>`;
+  let mk="";
+  if(a.sweepT&&a.sweepPx!=null)mk+=`<circle cx="${x(a.sweepT).toFixed(1)}" cy="${y(a.sweepPx).toFixed(1)}" r="3.5" fill="var(--down)" stroke="var(--bg-0)" stroke-width="1.5"/>`;
+  if(a.reclaimT)mk+=`<circle cx="${x(a.reclaimT).toFixed(1)}" cy="${y(a.bias==="bullish"?a.asiaLow:a.asiaHigh).toFixed(1)}" r="3.5" fill="var(--up)" stroke="var(--bg-0)" stroke-width="1.5"/>`;
+  $("#amdChart").innerHTML=band(S.asia,"#0a84ff","ASIA · accumulation")+band(S.london,"#e5342a","LONDON · manipulation")+band(S.ny,"#1aa851","NEW YORK · distribution")+g+ax+k+ln+cones+nowLine+mk;
+  $("#amdLegend").innerHTML=`<span><i class="swatch" style="background:#0a84ff"></i>Asia</span><span><i class="swatch" style="background:#e5342a"></i>London</span><span><i class="swatch" style="background:#1aa851"></i>New York</span><span><i class="swatch" style="background:var(--ink-3)"></i>projection</span>`;
+}
+pullAmd();setInterval(pullAmd,20000);
 tick();setInterval(tick,1000);
 </script>
 </body>

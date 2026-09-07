@@ -6,6 +6,7 @@ It serves one page that live-updates every second with:
 
 - **Tokenized PLTRX** (Bybit primary, Kraken fallback): live order book, buy/sell trade tape, large-order prints, order-book imbalance, 24h volume. This is the crypto-exchange depth data — order book, tape, large orders — for the tokenized Palantir market.
 - **Real NASDAQ PLTR** (Yahoo Finance): price, 20-session chart, 52-week range, volume, 50/200-day moving averages, RSI(14), and fundamentals (P/E, market cap, beta, short interest, analyst targets) where available.
+- **AMD / Power of 3** (`amd.py`): the session model — Asia accumulates a range, London sweeps one side (manipulation), New York expands (distribution). Detects the sweep, the reclaim, the resulting bias, and derives entry / invalidation / T1 / T2 with R:R. Runs on the tokenized PLTR perp, the only PLTR market that trades through Asia and London. Served at `/api/amd`, shown in the "AMD · Power of 3" tab with a session-shaded candle chart, and folded into the composite signal as its own indicator.
 - **AI agent** (Anthropic): scores each news headline bullish/bearish/neutral, writes a short desk read, and feeds a composite **STRONG BUY / SIDEWAYS / STRONG SELL** signal with conviction and a projection band.
 - **News**: Google News RSS (free, no key). Optional X/Twitter buzz with a bearer token.
 
@@ -50,6 +51,21 @@ It installs deps, binds to `0.0.0.0:8000`, and prints both URLs:
 - **Phone / other laptop on the same Wi-Fi:** `http://<this-machine-IP>:8000`
 
 Find your IP if needed: macOS `ipconfig getifaddr en0`, Windows `ipconfig`, Linux `hostname -I`. Change the port with `PORT=9000 bash run_local.sh`. For the AI agent locally, copy `.env.example` to `.env` and add `ANTHROPIC_API_KEY`.
+
+### Host it on an IP address
+
+`./pltr` binds `0.0.0.0`, so the dashboard already answers on **every IP this machine has** — it prints them all at startup. Use whichever fits:
+
+| Reach | URL | Setup |
+|---|---|---|
+| This machine | `http://localhost:8000` | none |
+| Anything on your Wi-Fi (phone, other laptop) | `http://<LAN-IP>:8000` | none — the launcher prints the IP |
+| One specific interface only | `HOST=192.168.1.50 ./pltr` | pin the bind address |
+| The public internet | your router's WAN IP | forward port 8000 on the router to this machine |
+| The public internet, no router config | a tunnel URL | `cloudflared tunnel --url http://localhost:8000` |
+| Always-on public URL | your Render URL | already deployed — see above |
+
+macOS firewall may prompt on first run — allow incoming connections for Python, or the LAN IP won't answer.
 
 **Manual:**
 ```bash
