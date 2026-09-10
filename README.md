@@ -8,7 +8,8 @@ It serves one page that live-updates every second with:
 - **Real NASDAQ PLTR** (Yahoo Finance): price, 20-session chart, 52-week range, volume, 50/200-day moving averages, RSI(14), and fundamentals (P/E, market cap, beta, short interest, analyst targets) where available.
 - **AMD / Power of 3** (`amd.py`): the session model — Asia accumulates a range, London sweeps one side (manipulation), New York expands (distribution). Detects the sweep, the reclaim, the resulting bias, and derives entry / invalidation / T1 / T2 with R:R. Runs on the tokenized PLTR perp, the only PLTR market that trades through Asia and London. Served at `/api/amd`, shown in the "AMD · Power of 3" tab with a session-shaded candle chart, and folded into the composite signal as its own indicator.
 - **AI agent** (Anthropic): scores each news headline bullish/bearish/neutral, writes a short desk read, and feeds a composite **STRONG BUY / SIDEWAYS / STRONG SELL** signal with conviction and a projection band.
-- **News**: Google News RSS (free, no key). Optional X/Twitter buzz with a bearer token.
+- **Fast news** (`newsfeed.py`): every free real-time source polled **in parallel** and de-duplicated — SEC EDGAR filings, Yahoo Finance, Nasdaq, Seeking Alpha, Google News and StockTwits — so a headline appears the moment any one of them prints it. Default poll is every 8s. (True HFT wires — Bloomberg, Reuters, Dow Jones, Benzinga Pro — are paid commercial products with no open-source equivalent; this is the fastest free stack.) Optional X/Twitter buzz with a bearer token.
+- **Insiders & Congress** (`filings.py`): who else is trading PLTR, from public disclosures — **SEC Form 4** (officers, directors, 10%+ holders, filed within 2 business days, parsed straight from PLTR's EDGAR index at CIK 0001321655) and **STOCK Act** periodic transaction reports from US House and Senate members. Served at `/api/filings`, shown in the "Insiders & Congress" tab.
 
 > Not financial advice. Tokenized PLTRX is a separate, thinner market that tracks — but can diverge from — the NASDAQ stock, especially outside US hours. Signals are model-derived and can be wrong.
 
@@ -73,21 +74,40 @@ pip install -r requirements.txt
 uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
-The UI is a **white one-pager** — every section (live market, overview, fundamentals, projection, open-window edge) is visible on one scroll; the top tabs just jump to a section. A ◐ button toggles a dark theme.
+The UI is a **white one-pager** — every section (live market, overview, fundamentals, projection, open-window edge, AMD, insiders & congress) is visible on one scroll; the top tabs just jump to a section. A ◐ button toggles a dark theme.
+
+## Install it as an app
+
+The dashboard is a **PWA**, so it installs to a phone home screen or a desktop dock and opens full-screen with no browser chrome.
+
+- **iPhone / iPad** — open the URL in Safari → Share → *Add to Home Screen*.
+- **Android** — Chrome shows an *Install app* prompt, or menu → *Add to Home screen*.
+- **Desktop** — Chrome/Edge show an install icon in the address bar.
+
+Layout fills whatever screen it lands on: fluid up to ultra-wide desktops, and on mobile it fills the viewport dynamically (`100dvh`) and respects notch/home-bar safe areas. The service worker caches only the shell — every `/api/` call is network-only, because stale market data is worse than none.
+
+**"i" buttons.** Any indicator or bit of jargon that isn't plain English has a small ⓘ next to it — tap for a short explanation of what it measures and how to read it.
+
+**Order book units.** The order book has a **PLTR ⇄ USDT** toggle: read resting size as share counts or as dollar value. The tape and large-order prints follow the same setting, which is remembered per browser.
 
 ## How it works
 Three async loops keep a cached `STATE`; the page polls `/api/state` every second.
 
 | Loop | Default | Source |
 |---|---|---|
-| Crypto (order book, tape) | 2s | Bybit v5 / Kraken public API |
+| Rotating mark price | 1s | one of ~10 exchanges per tick, round-robin |
+| Order book / tape | 3s | best available venue (`DEPTH_PRIORITY`) |
 | Stock (price, technicals) | 30s | Yahoo Finance |
-| AI agent (news, signal) | 300s | Google News RSS + Anthropic |
+| News | 8s | EDGAR + Yahoo + Nasdaq + Seeking Alpha + Google + StockTwits, in parallel |
+| AI agent (rescoring, thesis) | 60s | Anthropic |
+| AMD sessions | 60s | intraday candles from the depth venue |
+| Insiders & Congress | 30min | SEC EDGAR Form 4 + STOCK Act datasets |
 
 The PLTRX symbol is **auto-discovered** on startup (scans Bybit/Kraken instruments for `PLTR`). Override with `BYBIT_SYMBOL` / `KRAKEN_PAIR` if needed. All tunables are env vars — see `.env.example` / `render.yaml`.
 
 ## Endpoints
-- `/` dashboard · `/api/state` full JSON state · `/healthz` health check.
+- `/` dashboard · `/api/state` full JSON state · `/api/amd` AMD payload · `/api/filings` insiders + congress · `/api/backtest` edge study · `/healthz` health check.
+- PWA: `/manifest.webmanifest` · `/sw.js` (served from root so its scope covers the whole site) · `/favicon.ico`.
 
 ## Upgrades
 - **X/Twitter sentiment**: set `X_BEARER_TOKEN` (X API v2 recent search).

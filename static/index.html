@@ -2,8 +2,20 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>PLTR Signal Desk</title>
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" type="image/png" sizes="32x32" href="/static/icons/icon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/static/icons/icon-16.png">
+<link rel="apple-touch-icon" href="/static/icons/icon-180.png">
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#eef1f6" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#070a10" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="PLTR Desk">
+<meta name="description" content="Live Palantir trading desk — composite signal, order book, AMD sessions, fast news and insider/congress disclosures.">
 <style>
 :root{
   --bg-0:#eef1f6;--bg-1:#e5e9f0;
@@ -15,6 +27,7 @@
   --accent:#0a84ff;--accent-soft:rgba(10,132,255,.14);
   --up:#1aa851;--up-soft:rgba(26,168,81,.14);--down:#e5342a;--down-soft:rgba(229,52,42,.13);
   --flat:#c08a00;--flat-soft:rgba(192,138,0,.14);--grid:rgba(15,20,32,.09);
+  --glass-strong:rgba(255,255,255,.9);
 }
 @media (prefers-color-scheme:dark) and (min-width:99999px){:root:not([data-theme="light"]){
   --bg-0:#070a10;--bg-1:#0a0e17;--mesh-a:rgba(10,132,255,.26);--mesh-b:rgba(120,90,255,.20);--mesh-c:rgba(48,209,88,.12);
@@ -23,7 +36,7 @@
   --shadow:0 18px 46px -18px rgba(0,0,0,.7),0 2px 10px -4px rgba(0,0,0,.5);
   --ink:#f3f5fa;--ink-2:#b6bfd2;--ink-3:#7f8aa1;--accent:#3d9bff;--accent-soft:rgba(61,155,255,.18);
   --up:#32d158;--up-soft:rgba(50,209,88,.16);--down:#ff5b52;--down-soft:rgba(255,91,82,.16);
-  --flat:#ffd426;--flat-soft:rgba(255,212,38,.15);--grid:rgba(255,255,255,.08);
+  --flat:#ffd426;--flat-soft:rgba(255,212,38,.15);--grid:rgba(255,255,255,.08);--glass-strong:rgba(18,22,32,.9);
 }}
 :root[data-theme="dark"]{
   --bg-0:#070a10;--bg-1:#0a0e17;--mesh-a:rgba(10,132,255,.26);--mesh-b:rgba(120,90,255,.20);--mesh-c:rgba(48,209,88,.12);
@@ -32,7 +45,7 @@
   --shadow:0 18px 46px -18px rgba(0,0,0,.7),0 2px 10px -4px rgba(0,0,0,.5);
   --ink:#f3f5fa;--ink-2:#b6bfd2;--ink-3:#7f8aa1;--accent:#3d9bff;--accent-soft:rgba(61,155,255,.18);
   --up:#32d158;--up-soft:rgba(50,209,88,.16);--down:#ff5b52;--down-soft:rgba(255,91,82,.16);
-  --flat:#ffd426;--flat-soft:rgba(255,212,38,.15);--grid:rgba(255,255,255,.08);
+  --flat:#ffd426;--flat-soft:rgba(255,212,38,.15);--grid:rgba(255,255,255,.08);--glass-strong:rgba(18,22,32,.9);
 }
 *{box-sizing:border-box}
 body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","SF Pro Display","Helvetica Neue",Arial,system-ui,sans-serif;
@@ -44,7 +57,12 @@ body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
   linear-gradient(180deg,var(--bg-0),var(--bg-1))}
 img{max-width:100%}
 .mono{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;font-variant-numeric:tabular-nums;letter-spacing:-.02em}
-.wrap{max-width:1360px;margin:0 auto;padding:18px clamp(12px,2.4vw,26px) 44px}
+.wrap{max-width:min(2040px,100%);margin:0 auto;min-height:100dvh;display:flex;flex-direction:column;
+  padding:18px clamp(12px,2.2vw,30px) 44px;
+  padding-left:max(clamp(12px,2.2vw,30px),env(safe-area-inset-left));
+  padding-right:max(clamp(12px,2.2vw,30px),env(safe-area-inset-right));
+  padding-bottom:calc(44px + env(safe-area-inset-bottom))}
+html{background:var(--bg-0)}
 .glass{background:var(--glass);-webkit-backdrop-filter:blur(24px) saturate(180%);backdrop-filter:blur(24px) saturate(180%);
   border:1px solid var(--stroke);border-radius:20px;box-shadow:var(--shadow)}
 .glass-inset{background:var(--glass-2);border:1px solid var(--stroke-2);border-radius:14px}
@@ -104,12 +122,16 @@ img{max-width:100%}
 .exstrip{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
 .expill{font-size:11px;padding:4px 9px;border-radius:99px;background:var(--glass-2);border:1px solid var(--stroke-2)}
 .expill .nm{color:var(--ink-3);margin-right:5px}
-.grid{display:grid;grid-template-columns:1fr 372px;gap:16px;align-items:start}
-.tabs{display:flex;gap:4px;padding:5px;margin-bottom:14px;overflow-x:auto;position:sticky;top:78px;z-index:40}
+.grid{display:grid;grid-template-columns:minmax(0,1fr) var(--rail);gap:16px;align-items:start;flex:1 1 auto}
+.grid>main{min-width:0}
+:root{--rail:clamp(330px,23vw,430px);--hdr:66px}
+.top,.tabs{background:var(--glass-strong)}
+.tabs{display:flex;gap:4px;padding:5px;margin-bottom:14px;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;position:sticky;top:calc(var(--hdr) + 20px);z-index:40}
+.tabs::-webkit-scrollbar{display:none}
 .tab{border:0;background:transparent;color:var(--ink-3);padding:8px 15px;border-radius:11px;font-size:13.5px;font-weight:580;cursor:pointer;white-space:nowrap;font-family:inherit;transition:.15s}
 .tab:hover{color:var(--ink-2)}.tab[aria-selected="true"]{background:var(--glass-hi);color:var(--ink);box-shadow:0 1px 4px rgba(0,0,0,.08)}
 .tab:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-.panel{padding:18px 20px;margin-bottom:16px;scroll-margin-top:150px}.panel[hidden]{display:none}
+.panel{padding:18px 20px;margin-bottom:16px;scroll-margin-top:calc(var(--hdr) + 78px)}.panel[hidden]{display:none}
 .panel h3{font-size:12px;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-3);margin:0 0 12px;font-weight:650}
 .panel h3.mt{margin-top:22px}
 
@@ -117,11 +139,15 @@ img{max-width:100%}
 .mkthead{display:flex;flex-wrap:wrap;gap:10px;align-items:baseline;margin-bottom:14px}
 .mkthead .big{font-size:30px;font-weight:720}
 .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(116px,1fr));gap:10px}
-.tile{padding:12px 13px;border-radius:13px}.tile .k{font-size:11px;color:var(--ink-3);font-weight:560}
+.tile{padding:12px 13px;border-radius:13px;min-width:0}
+.tile .v,.tile .x,.tile .k{overflow-wrap:anywhere}.tile .k{font-size:11px;color:var(--ink-3);font-weight:560}
 .tile .v{font-size:18px;font-weight:660;margin-top:3px}.tile .x{font-size:11px;color:var(--ink-3);margin-top:2px}
 .tile .v.up{color:var(--up)}.tile .v.down{color:var(--down)}
 
 .book{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.bookcol{width:100%;max-width:430px}
+.book>.bookcol:first-child{margin-left:auto}   /* bids hug the centre line, asks run out from it */
+.imb,.tape,.rows{max-width:1140px}
 .bookcol .bh{display:flex;justify-content:space-between;font-size:11px;color:var(--ink-3);font-weight:600;padding:0 4px 6px}
 .brow{position:relative;display:flex;justify-content:space-between;padding:3px 6px;font-size:12.5px;border-radius:6px;overflow:hidden}
 .brow .depth{position:absolute;top:0;bottom:0;opacity:.16}
@@ -132,7 +158,7 @@ img{max-width:100%}
 .imb .b{background:var(--up)}.imb .lab{display:flex;justify-content:space-between;font-size:11.5px;font-weight:600;margin-top:5px}
 .imb .lab .u{color:var(--up)}.imb .lab .d{color:var(--down)}
 
-.tape{display:flex;flex-direction:column;max-height:340px;overflow-y:auto}
+.tape{display:flex;flex-direction:column;max-height:clamp(280px,34vh,460px);overflow-y:auto}
 .trow{display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:8px;padding:5px 8px;font-size:12px;border-radius:6px;align-items:center}
 .trow+.trow{border-top:1px solid var(--stroke-2)}
 .trow .p{font-weight:600}.trow.buy .p{color:var(--up)}.trow.sell .p{color:var(--down)}
@@ -149,8 +175,13 @@ img{max-width:100%}
 .row .v .tag2{font-size:11px;font-weight:600;padding:1px 7px;border-radius:99px;margin-left:6px}
 .tag2.up{color:var(--up);background:var(--up-soft)}.tag2.down{color:var(--down);background:var(--down-soft)}.tag2.flat{color:var(--flat);background:var(--flat-soft)}
 
-.chart{width:100%;height:auto;display:block}
-.chart-foot{display:flex;justify-content:space-between;margin-top:8px;font-size:11px;color:var(--ink-3)}
+.chart{width:100%;height:auto;display:block;max-height:min(48vh,430px)}
+.chart-foot{display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap;margin-top:10px;font-size:11px;color:var(--ink-3)}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center}
+.legend .lg{display:inline-flex;align-items:center;gap:6px;white-space:nowrap;font-size:11px;color:var(--ink-2);font-weight:560}
+.swatch{width:12px;height:3px;border-radius:2px;display:inline-block;flex:none}
+/* the AMD chart sizes its own viewBox to the panel, so it must not be letterboxed */
+#amdChart{max-height:none;height:auto}
 
 /* projection */
 .projbar{position:relative;height:64px;margin:24px 0 8px}
@@ -165,7 +196,7 @@ img{max-width:100%}
 .scen .bull .t,.scen .bull .p{color:var(--up)}.scen .base .t{color:var(--flat)}.scen .bear .t,.scen .bear .p{color:var(--down)}
 
 /* rail */
-.rail{display:flex;flex-direction:column;gap:16px;position:sticky;top:82px}
+.rail{display:flex;flex-direction:column;gap:16px;position:sticky;top:calc(var(--hdr) + 24px);max-height:calc(100dvh - var(--hdr) - 40px);overflow-y:auto;scrollbar-width:thin}
 .senti{padding:16px 18px}.senti .top-r{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px}
 .senti .val{font-size:20px;font-weight:720}.senti .val.up{color:var(--up)}.senti .val.down{color:var(--down)}.senti .val.flat{color:var(--flat)}
 .senti .meter{height:9px;border-radius:99px;background:var(--down-soft);overflow:hidden;display:flex}
@@ -196,15 +227,81 @@ img{max-width:100%}
 .foot{margin-top:22px;padding:16px 20px;font-size:11.5px;color:var(--ink-3);line-height:1.6}
 .foot .discl{padding:10px 12px;border-radius:12px;background:var(--flat-soft);color:var(--ink-2);margin-bottom:10px}
 .muted{color:var(--ink-3)}
-@media (max-width:980px){.grid{grid-template-columns:1fr}.signal{grid-template-columns:1fr}.rail{position:static}.top{position:static}.book{grid-template-columns:1fr}.tabs{position:static}}
+/* "i" explainers */
+.ib{appearance:none;border:1px solid var(--stroke);background:var(--glass-2);color:var(--ink-3);
+  width:16px;height:16px;min-width:16px;border-radius:50%;font-size:10px;font-weight:700;line-height:1;
+  cursor:pointer;padding:0;display:inline-grid;place-items:center;vertical-align:middle;margin-left:6px;
+  font-family:inherit;text-transform:none;letter-spacing:0;transition:.15s}
+.ib:hover,.ib[aria-expanded="true"]{background:var(--accent);border-color:var(--accent);color:#fff}
+.ib:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.ipop{position:fixed;z-index:200;max-width:min(340px,calc(100vw - 24px));padding:13px 15px;border-radius:15px;
+  background:var(--glass);-webkit-backdrop-filter:blur(30px) saturate(180%);backdrop-filter:blur(30px) saturate(180%);
+  border:1px solid var(--stroke);box-shadow:0 22px 48px -18px rgba(18,24,40,.42),0 2px 8px rgba(18,24,40,.10);
+  font-size:12.5px;line-height:1.55;color:var(--ink-2);letter-spacing:-.005em}
+.ipop h4{margin:0 0 5px;font-size:12.5px;font-weight:700;color:var(--ink);letter-spacing:-.01em}
+.ipop b{color:var(--ink)}
+.ipop .rd{display:block;margin-top:7px;padding-top:7px;border-top:1px solid var(--stroke-2);color:var(--ink-3);font-size:11.5px}
+
+/* segmented control (order book units) */
+.seg{display:inline-flex;gap:2px;padding:2px;border-radius:9px;background:var(--glass-2);border:1px solid var(--stroke-2)}
+.seg button{appearance:none;border:0;background:transparent;color:var(--ink-3);font:inherit;font-size:11px;font-weight:650;
+  padding:3px 10px;border-radius:7px;cursor:pointer;letter-spacing:0;text-transform:none;transition:.15s}
+.seg button[aria-pressed="true"]{background:var(--glass-hi);color:var(--ink);box-shadow:0 1px 3px rgba(0,0,0,.10)}
+.seg button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.h3row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 12px}
+.h3row.mt{margin-top:22px}
+.h3row h3{margin:0}
+.h3row .sp{margin-left:auto}
+
+/* insiders & congress */
+.fsum{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-bottom:14px}
+.fl{display:flex;flex-direction:column;gap:1px;border-radius:13px;overflow:hidden}
+.fr{display:grid;grid-template-columns:minmax(0,1.5fr) auto minmax(0,1fr) auto;gap:10px;align-items:center;
+  padding:10px 13px;background:var(--glass-2);text-decoration:none;color:inherit;transition:.15s}
+.fr:hover{background:var(--glass-hi)}
+.fr .who{font-weight:620;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fr .role{font-size:11px;color:var(--ink-3);font-weight:500}
+.fr .amt{font-size:12.5px;font-weight:600;text-align:right}
+.fr .when{font-size:11px;color:var(--ink-3);text-align:right;white-space:nowrap}
+.pill{font-size:10px;font-weight:700;text-transform:uppercase;padding:2px 8px;border-radius:99px;letter-spacing:.02em}
+.pill.buy{color:var(--up);background:var(--up-soft)}.pill.sell{color:var(--down);background:var(--down-soft)}
+.pill.other{color:var(--ink-3);background:var(--glass-2);border:1px solid var(--stroke-2)}
+.emptybox{padding:14px;border-radius:13px;background:var(--glass-2);font-size:12.5px;color:var(--ink-3);line-height:1.55}
+
+@media (max-width:980px){
+  .grid{grid-template-columns:1fr}.signal{grid-template-columns:1fr}
+  .rail{position:static;max-height:none;overflow:visible}
+  .top{position:sticky;top:0;border-radius:0 0 20px 20px;margin:-18px calc(-1 * clamp(12px,2.2vw,30px)) 16px;
+    padding-top:calc(12px + env(safe-area-inset-top))}
+  .book{grid-template-columns:1fr}
+  .tabs{position:sticky;top:calc(var(--hdr) - 2px);border-radius:14px}
+  .panel{scroll-margin-top:calc(var(--hdr) + 62px)}
+}
 @media (max-width:600px){
-  .wrap{padding:10px 10px 34px}
-  .top{padding:12px 14px;gap:10px}
-  .brand h1{font-size:15px}
-  .hprice{order:3;width:100%;margin-left:0;flex-wrap:wrap;gap:6px}
-  .hprice .px{font-size:22px}
-  .hmeta{margin-left:auto}
-  .status{font-size:10px}
+  .wrap{padding:10px 10px 34px;padding-left:max(10px,env(safe-area-inset-left));
+    padding-right:max(10px,env(safe-area-inset-right));padding-bottom:calc(34px + env(safe-area-inset-bottom))}
+  .top{margin:-10px -10px 12px;border-radius:0 0 18px 18px;gap:7px 10px;padding:8px 12px;
+    padding-top:calc(8px + env(safe-area-inset-top))}
+  .brand{gap:9px}
+  .brand .sub{display:none}
+  .mark{width:30px;height:30px;border-radius:9px}
+  .mark svg{width:16px;height:16px}
+  .brand h1{font-size:14.5px}
+  .hprice{order:0;width:auto;margin-left:auto;gap:6px;flex-wrap:nowrap;max-width:62%;
+    overflow-x:auto;scrollbar-width:none}
+  .hprice::-webkit-scrollbar{display:none}
+  .hprice .px{font-size:19px}
+  .hmeta{order:1;width:100%;margin-left:0;gap:10px;justify-content:space-between}
+  .status{flex-direction:row;align-items:center;gap:9px;text-align:left;font-size:10px}
+  .tbtn{width:30px;height:30px;border-radius:9px;font-size:13px}
+  .tiles{grid-template-columns:repeat(auto-fit,minmax(104px,1fr));gap:8px}
+  .tile .v{font-size:15px}
+  .tile .k,.tile .x{font-size:10.5px}
+  .fsum{grid-template-columns:repeat(2,1fr)}
+  .fr{grid-template-columns:minmax(0,1fr) auto;row-gap:3px}
+  .fr .amt{grid-column:1;text-align:left}.fr .when{grid-column:2}
+  .scen{grid-template-columns:1fr}
+  .ipop{max-width:calc(100vw - 20px)}
   .signal{padding:16px}
   .sig-word{font-size:40px}
   .tf{min-width:0;flex:1 1 30%}
@@ -244,19 +341,19 @@ img{max-width:100%}
 
   <section class="signal glass">
     <div class="sig-left">
-      <span class="eyebrow">Composite signal</span>
+      <span class="eyebrow">Composite signal<button class="ib" type="button" data-i="composite" aria-label="What is this?" aria-expanded="false">i</button></span>
       <div class="sig-word side" id="sigWord">—</div>
       <div class="sig-bias" id="sigBias">Waiting for first data…</div>
       <div class="conf"><div class="bar"><div class="fill" id="confFill" style="width:0%"></div></div>
-        <div class="lab"><span>Conviction</span><span id="confVal">—</span></div></div>
+        <div class="lab"><span>Conviction<button class="ib" type="button" data-i="conviction" aria-label="What is this?" aria-expanded="false">i</button></span><span id="confVal">—</span></div></div>
     </div>
     <div class="sig-right">
       <div class="tfblock">
-        <span class="blab">Short-term signals</span>
+        <span class="blab">Short-term signals<button class="ib" type="button" data-i="timeframes" aria-label="What is this?" aria-expanded="false">i</button></span>
         <div class="tfstrip" id="tfStrip" aria-label="Short-term timeframe signals"></div>
       </div>
       <div class="tfblock">
-        <span class="blab">Indicators driving the call</span>
+        <span class="blab">Indicators driving the call<button class="ib" type="button" data-i="factors" aria-label="What is this?" aria-expanded="false">i</button></span>
         <div class="factors" id="factors"></div>
       </div>
     </div>
@@ -271,12 +368,13 @@ img{max-width:100%}
         <button class="tab" role="tab" aria-selected="false" aria-controls="p-proj" id="t-proj">Projection</button>
         <button class="tab" role="tab" aria-selected="false" aria-controls="p-edge" id="t-edge">Open-window edge</button>
         <button class="tab" role="tab" aria-selected="false" aria-controls="p-amd" id="t-amd">AMD · Power of 3</button>
+        <button class="tab" role="tab" aria-selected="false" aria-controls="p-filings" id="t-fil">Insiders &amp; Congress</button>
       </div>
 
       <!-- LIVE MARKET -->
       <section class="panel glass" role="tabpanel" id="p-live" aria-labelledby="t-live">
         <div class="mkthead">
-          <span class="eyebrow">Tokenized PLTRX · <span id="mktSource">—</span></span>
+          <span class="eyebrow">Tokenized PLTRX<button class="ib" type="button" data-i="tokenized" aria-label="What is this?" aria-expanded="false">i</button> · <span id="mktSource">—</span></span>
           <span class="big mono" id="tokPx">—</span>
           <span class="chip flat" id="tokPct">—</span>
           <span class="chip ghost tiny mono" id="tokBasis"></span>
@@ -285,18 +383,27 @@ img{max-width:100%}
         <div id="exStrip" class="exstrip"></div>
         <div id="cumVol" class="muted" style="font-size:11.5px;margin:-4px 0 12px"></div>
 
-        <h3>Order book</h3>
+        <div class="h3row">
+          <h3>Order book<button class="ib" type="button" data-i="book" aria-label="What is this?" aria-expanded="false">i</button></h3>
+          <div class="sp"></div>
+          <span class="blab">Show sizes in</span>
+          <div class="seg" id="unitSeg" role="group" aria-label="Order book units">
+            <button type="button" data-u="base" aria-pressed="true">PLTR</button>
+            <button type="button" data-u="usdt" aria-pressed="false">USDT</button>
+          </div>
+        </div>
         <div class="book">
-          <div class="bookcol"><div class="bh"><span>Bid size</span><span>Price</span></div><div id="bookBids" class="bids"></div></div>
-          <div class="bookcol"><div class="bh"><span>Price</span><span>Ask size</span></div><div id="bookAsks" class="asks"></div></div>
+          <div class="bookcol"><div class="bh"><span id="bhBid">Bid size</span><span>Price</span></div><div id="bookBids" class="bids"></div></div>
+          <div class="bookcol"><div class="bh"><span>Price</span><span id="bhAsk">Ask size</span></div><div id="bookAsks" class="asks"></div></div>
         </div>
         <div class="imb"><div class="bar"><div class="b" id="imbBar" style="width:50%"></div></div>
           <div class="lab"><span class="u" id="imbBid">Bids —</span><span class="d" id="imbAsk">Asks —</span></div></div>
+        <div class="muted" style="font-size:11px;margin-top:2px">Order-book imbalance<button class="ib" type="button" data-i="imbalance" aria-label="What is this?" aria-expanded="false">i</button></div>
 
-        <h3 class="mt">Buy / sell tape <span class="muted" style="text-transform:none;letter-spacing:0">— large prints highlighted</span></h3>
+        <div class="h3row mt"><h3>Buy / sell tape<button class="ib" type="button" data-i="tape" aria-label="What is this?" aria-expanded="false">i</button></h3><span class="muted" style="font-size:11.5px">large prints highlighted</span></div>
         <div class="tape" id="tape"></div>
 
-        <h3 class="mt">Large orders <span class="muted" style="text-transform:none;letter-spacing:0" id="largeThresh"></span></h3>
+        <div class="h3row mt"><h3>Large orders<button class="ib" type="button" data-i="large" aria-label="What is this?" aria-expanded="false">i</button></h3><span class="muted" style="font-size:11.5px" id="largeThresh"></span></div>
         <div id="largeOrders"></div>
       </section>
 
@@ -315,13 +422,13 @@ img{max-width:100%}
         <div class="tiles" id="fundTiles"></div>
         <h3 class="mt">Analyst targets · 12-month</h3>
         <div class="rows" id="tgtRows"></div>
-        <h3 class="mt">Technicals &amp; positioning</h3>
+        <h3 class="mt">Technicals &amp; positioning<button class="ib" type="button" data-i="technicals" aria-label="What is this?" aria-expanded="false">i</button></h3>
         <div class="rows" id="techRows"></div>
       </section>
 
       <!-- PROJECTION -->
       <section class="panel glass" role="tabpanel" id="p-proj" aria-labelledby="t-proj" hidden>
-        <h3>Expected range — next 5 sessions</h3>
+        <h3>Expected range — next 5 sessions<button class="ib" type="button" data-i="projection" aria-label="What is this?" aria-expanded="false">i</button></h3>
         <div class="projbar" id="projbar"></div>
         <div class="projends"><span id="projLow">—</span><span id="projHigh">—</span></div>
         <div class="scen" id="scen"></div>
@@ -333,7 +440,7 @@ img{max-width:100%}
         <h3 class="mt">Where the move happens — avg move per minute after the open (16:30 EAT)</h3>
         <div id="btProfile"></div>
         <p class="muted" style="font-size:11.5px;margin:6px 2px 0">Bars = average absolute price move in each minute of the open window, across the backtested days. Taller early bars confirm the 16:30–16:32 concentration.</p>
-        <h3 class="mt">Models tested — out-of-sample (held-out newest 30% of days)</h3>
+        <h3 class="mt">Models tested — out-of-sample (held-out newest 30% of days)<button class="ib" type="button" data-i="oos" aria-label="What is this?" aria-expanded="false">i</button></h3>
         <div class="rows" id="btRules"></div>
         <h3 class="mt">Read &amp; caveats</h3>
         <div id="btNotes"></div>
@@ -342,25 +449,39 @@ img{max-width:100%}
       <!-- AMD / POWER OF 3 -->
       <section class="panel glass" role="tabpanel" id="p-amd" aria-labelledby="t-amd" hidden>
         <div id="amdBanner"></div>
-        <h3 class="mt">PLTR price movement — Asia / London / New York</h3>
+        <h3 class="mt">PLTR price movement — Asia / London / New York<button class="ib" type="button" data-i="amd" aria-label="What is this?" aria-expanded="false">i</button></h3>
         <svg class="chart" id="amdChart" viewBox="0 0 720 340" preserveAspectRatio="xMidYMid meet" role="img" aria-label="AMD session chart"></svg>
         <div class="chart-foot"><div class="legend" id="amdLegend"></div><span id="amdMeta"></span></div>
         <div id="amdProj" class="tiles" style="margin-top:12px"></div>
-        <h3 class="mt">Levels</h3>
+        <h3 class="mt">Levels<button class="ib" type="button" data-i="levels" aria-label="What is this?" aria-expanded="false">i</button></h3>
         <div class="rows" id="amdLevels"></div>
         <p class="note" id="amdNote"></p>
+      </section>
+
+      <!-- INSIDERS & CONGRESS -->
+      <section class="panel glass" role="tabpanel" id="p-filings" aria-labelledby="t-fil" hidden>
+        <div class="h3row"><h3>Who else is trading PLTR<button class="ib" type="button" data-i="filings" aria-label="What is this?" aria-expanded="false">i</button></h3><span class="muted sp" style="font-size:11px" id="filAsOf"></span></div>
+        <div class="fsum" id="filSum"></div>
+
+        <div class="h3row mt"><h3>Company insiders — SEC Form 4<button class="ib" type="button" data-i="form4" aria-label="What is this?" aria-expanded="false">i</button></h3><span class="muted" style="font-size:11.5px">filed within 2 business days</span></div>
+        <div id="filIns"></div>
+
+        <div class="h3row mt"><h3>US politicians — STOCK Act<button class="ib" type="button" data-i="stockact" aria-label="What is this?" aria-expanded="false">i</button></h3><span class="muted" style="font-size:11.5px">filed within 45 days — dates lag</span></div>
+        <div id="filCon"></div>
+
+        <p class="thesis" style="margin-top:16px"><span class="badge">Sources</span>Insider rows come straight from PLTR's own SEC EDGAR filings index (issuer CIK 0001321655) and each Form 4's XML. Congressional rows come from the public House and Senate periodic-transaction-report datasets. Both are free public disclosures — nothing here is a live position, only what has already been filed.</p>
       </section>
     </main>
 
     <aside class="rail">
       <section class="senti glass">
-        <div class="top-r"><span class="eyebrow">AI news sentiment</span><span class="val flat" id="sentiVal">—</span></div>
+        <div class="top-r"><span class="eyebrow">AI news sentiment<button class="ib" type="button" data-i="sentiment" aria-label="What is this?" aria-expanded="false">i</button></span><span class="val flat" id="sentiVal">—</span></div>
         <div class="meter"><div class="m-up" id="mUp" style="width:0%"></div><div class="m-fl" id="mFl" style="width:0%"></div></div>
         <div class="keys"><span><i class="kd u"></i>Bull <b id="cUp">0</b></span><span><i class="kd f"></i>Neut <b id="cFl">0</b></span><span><i class="kd d"></i>Bear <b id="cDn">0</b></span></div>
         <div class="thesis" id="thesis"><span class="badge">Desk read</span><span id="thesisTxt">Waiting for the agent…</span></div>
       </section>
       <section class="feed glass">
-        <div class="fhead"><h3>Live news</h3><span class="chip flat tiny" id="feedCount">—</span></div>
+        <div class="fhead"><h3>Live news<button class="ib" type="button" data-i="news" aria-label="What is this?" aria-expanded="false">i</button></h3><span class="chip flat tiny" id="feedCount">—</span></div>
         <div id="feed"></div>
         <div class="agentbar"><span class="dot on"></span><span id="agentMsg">AI agent scores headlines every ~5 min.</span></div>
       </section>
@@ -384,12 +505,102 @@ const ago=ts=>{const s=(Date.now()-ts)/1000;return s<60?Math.round(s)+"s":s<3600
 const eat=ts=>{try{return new Date(ts).toLocaleString("en-GB",{timeZone:"Africa/Nairobi",day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"});}catch(e){return"";}};
 let lastPx=null, tokLast=null, liveSeries=[];
 
+/* ---------- keep sticky offsets exact so nothing ever overlaps ---------- */
+(function(){
+  const hdr=document.querySelector(".top");
+  const set=()=>document.documentElement.style.setProperty("--hdr",Math.round(hdr.getBoundingClientRect().height)+"px");
+  set();
+  if(window.ResizeObserver)new ResizeObserver(set).observe(hdr);
+  addEventListener("resize",set);addEventListener("orientationchange",()=>setTimeout(set,150));
+})();
+
+/* ---------- installable web app ---------- */
+if("serviceWorker" in navigator&&location.protocol!=="file:"){
+  addEventListener("load",()=>navigator.serviceWorker.register("/sw.js",{scope:"/"}).catch(()=>{}));
+}
+
+/* ---------- plain-English explainers behind every "i" ---------- */
+const GLOSSARY={
+ composite:["Composite signal","One call — <b>STRONG BUY</b>, <b>SIDEWAYS</b> or <b>STRONG SELL</b> — blended from every indicator below: the real stock's trend, momentum, tokenized order flow, the basis, valuation, AI-scored news and the AMD session read. Each contributes a weighted vote; the sum decides the word.","It is a summary, not an instruction. Check which indicators disagree before acting."],
+ conviction:["Conviction","How strongly the indicators agree, 0–100%. High conviction means most of them point the same way; low conviction means they are fighting each other, which usually means chop.",""],
+ timeframes:["Short-term signals (1M–15M)","The same call recomputed over the last 1, 3, 5, 10 and 15 minutes of live tick data, then nudged by the bigger picture (price vs the 50- and 200-day moving averages). When all five line up, the move has follow-through; when they split, it's noise.",""],
+ factors:["Indicators driving the call","Every input the composite used, with its direction (▲ bullish, ▼ bearish, → neutral) and the number behind it. <b>Trend</b> = price vs moving averages. <b>Momentum</b> = RSI. <b>Order flow</b> = live book and tape pressure. <b>Basis</b> = tokenized vs real price gap. <b>Valuation</b> = P/E. <b>News</b> = AI sentiment. <b>AMD</b> = the session model.",""],
+ tokenized:["Tokenized PLTR (PLTRX)","Palantir stock itself only trades on NASDAQ, which has no public order book and closes at night. Crypto venues list a <b>tokenized</b> PLTR contract that trades nearly 24/5 — that is the only PLTR market with a visible order book, a trade tape, and Asia/London sessions, so it is what powers this panel.","It is a separate, thinner market. It tracks NASDAQ but can drift, especially outside US hours."],
+ book:["Order book","Live resting orders on the tokenized market. <b>Bids</b> are buyers waiting below; <b>asks</b> are sellers waiting above. The shaded bar behind each row shows that level's size relative to the biggest level on screen. Switch <b>PLTR ⇄ USDT</b> to read sizes as share counts or as dollar value.",""],
+ imbalance:["Order-book imbalance","Resting bid size as a share of total resting size. Above ~60% means buyers are stacked deeper than sellers — a short-term upward lean, and vice versa.","Resting orders can be pulled instantly. Treat it as pressure, not commitment."],
+ tape:["Buy / sell tape","Trades as they actually print. Green = the buyer crossed the spread (aggressive buying), red = the seller did. This is executed volume, so it is harder to fake than the book.",""],
+ large:["Large orders","Individual prints above the size threshold shown. Clusters of large buys or sells often mark where a bigger participant is working an order.",""],
+ technicals:["Technicals & positioning","<b>50/200-day MA</b> — the average close over that many sessions; price above both is a healthy uptrend. <b>Short ratio</b> — days of average volume needed to cover all short positions; high numbers make squeezes more violent.",""],
+ projection:["Expected range","A band around the last NASDAQ close, sized from the 20-session range and recent daily volatility, with bull / base / bear cases inside it.","A statistical range, not a forecast. Gaps and news break it routinely."],
+ oos:["Out-of-sample test","The backtest splits history in two: rules are fitted on the older 70% of days and then scored <b>only</b> on the newest 30% they have never seen. A rule that looks great in-sample and dies out-of-sample was curve-fitted. We also show a Wilson confidence interval and a p-value, because a 70% hit rate on 12 trades means nothing.",""],
+ amd:["AMD / Power of 3","A session model. <b>Accumulation</b> — Asia builds a tight range. <b>Manipulation</b> — London pushes through one side of that range to trip stops (a liquidity sweep), then reverses. <b>Distribution</b> — New York expands in the true direction. A sweep of the Asia <i>low</i> that gets reclaimed is bullish; a sweep of the <i>high</i> is bearish.","The reclaim matters. A sweep that keeps going is a real breakout, not a manipulation."],
+ levels:["Levels","<b>Entry</b> — where the setup triggers. <b>Invalidation</b> — beyond the sweep, where the idea is simply wrong. <b>T1 / T2</b> — the first and second targets, usually the opposite side of the Asia range and a full range projection beyond it. <b>R:R</b> — reward divided by risk.",""],
+ news:["Live news","Every free real-time source polled in parallel and de-duplicated — SEC EDGAR filings, Yahoo, Nasdaq, Seeking Alpha, Google News and StockTwits — so a headline appears the moment any one of them prints it. Times are shown in EAT.","Bloomberg/Reuters-grade wires are paid products; this is the fastest free stack."],
+ sentiment:["AI news sentiment","An Anthropic model reads each headline and scores it bullish, bearish or neutral for PLTR specifically, then writes the desk read below. The tally feeds the composite signal.",""],
+ filings:["Who else is trading PLTR","Two public disclosure streams: company insiders filing SEC Form 4, and members of Congress filing under the STOCK Act. Both are legally required and free to read.","These are filings, not live positions — everything here already happened."],
+ form4:["SEC Form 4","Officers, directors and 10%+ shareholders must disclose their trades within two business days. Code <b>P</b> = open-market purchase and <b>S</b> = open-market sale are the ones that carry information; <b>A</b> (grant), <b>M</b> (option exercise) and <b>F</b> (shares withheld for tax) are compensation mechanics, not conviction.",""],
+ trend:["Trend (real stock)","Where NASDAQ PLTR sits against its 50- and 200-day moving averages. Price above both, with the 50 above the 200, is a confirmed uptrend and the single heaviest input in the composite.",""],
+ momentum:["Momentum (RSI 14)","The Relative Strength Index over 14 periods, 0–100. Above 70 is overbought (stretched, prone to a pullback), below 30 oversold. Mid-range readings say momentum is neutral.",""],
+ orderflow:["Order flow (PLTRX)","Combines resting book imbalance with what actually printed on the tape. Positive means aggressive buyers are lifting offers faster than sellers are hitting bids.",""],
+ basis:["Basis (tokenized vs stock)","How far the tokenized PLTR price sits above or below the real NASDAQ price, in percent. A large positive basis means the crypto market is paying a premium — often over-eager positioning that mean-reverts; a discount is the reverse.","Outside US hours the basis is also just the tokenized market pricing in overnight news early."],
+ valuationF:["Valuation","PLTR's price-to-earnings ratio. A very high multiple does not time a top, but it caps how much upside the composite is willing to lean on and raises the downside weight when momentum turns.",""],
+ stockact:["STOCK Act disclosures","Members of the US House and Senate must file a periodic transaction report within 45 days of a trade, with the amount given as a range rather than an exact figure. Filings often cluster around policy and contract news.","The 45-day lag means the trade is old news by the time you see it."]
+};
+
+/* ---------- popover ---------- */
+(function(){
+  let pop=null,cur=null;
+  const close=()=>{if(pop){pop.remove();pop=null;}if(cur){cur.setAttribute("aria-expanded","false");cur=null;}};
+  const place=()=>{
+    if(!pop||!cur)return;
+    const r=cur.getBoundingClientRect();
+    if(r.bottom<0||r.top>innerHeight){close();return;}   // anchor scrolled away
+    const pr=pop.getBoundingClientRect();
+    const left=Math.min(Math.max(10,r.left+r.width/2-pr.width/2),innerWidth-pr.width-10);
+    let top=r.bottom+9;
+    if(top+pr.height>innerHeight-10)top=Math.max(10,r.top-pr.height-9);
+    pop.style.left=left+"px";pop.style.top=top+"px";
+  };
+  const open=(btn)=>{
+    const g=GLOSSARY[btn.dataset.i];if(!g)return;
+    close();cur=btn;btn.setAttribute("aria-expanded","true");
+    pop=document.createElement("div");pop.className="ipop";pop.setAttribute("role","dialog");
+    pop.innerHTML=`<h4>${g[0]}</h4><div>${g[1]}</div>${g[2]?`<span class="rd">${g[2]}</span>`:""}`;
+    document.body.appendChild(pop);place();
+  };
+  document.addEventListener("click",e=>{
+    const b=e.target.closest(".ib");
+    if(b){e.preventDefault();e.stopPropagation();if(cur===b){close();}else{open(b);}return;}
+    if(pop&&!e.target.closest(".ipop"))close();
+  });
+  addEventListener("keydown",e=>{if(e.key==="Escape")close();});
+  // follow the anchor instead of closing — a tap on a phone often carries a little scroll with it
+  addEventListener("scroll",()=>{if(pop)requestAnimationFrame(place);},true);
+  addEventListener("resize",()=>{if(pop)place();});
+})();
+
+/* ---------- order-book units: PLTR base size vs USDT notional ---------- */
+let UNITS="base";
+try{UNITS=localStorage.getItem("pltr-units")||"base";}catch(e){}
+(function(){
+  const seg=document.getElementById("unitSeg");if(!seg)return;
+  const paint=()=>{[...seg.querySelectorAll("button")].forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.u===UNITS)));
+    const lab=UNITS==="usdt"?"Bid value (USDT)":"Bid size (PLTR)",lab2=UNITS==="usdt"?"Ask value (USDT)":"Ask size (PLTR)";
+    const a=document.getElementById("bhBid"),b=document.getElementById("bhAsk");
+    if(a)a.textContent=lab; if(b)b.textContent=lab2;};
+  seg.addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;
+    UNITS=b.dataset.u;try{localStorage.setItem("pltr-units",UNITS);}catch(e){}
+    paint();if(window._lastCrypto){renderBook(_lastCrypto);renderTape(_lastCrypto);renderLarge(_lastCrypto);}});
+  paint();
+})();
+const usz=(px,sz)=>UNITS==="usdt"?money0(px*sz):num(sz,2);
+
 (function(){const root=document.documentElement,b=$("#themeBtn");
   try{const s=localStorage.getItem("pltr-theme");if(s)root.setAttribute("data-theme",s);}catch(e){}
   b.onclick=()=>{const c=root.getAttribute("data-theme");const d=c?c==="dark":false;
     const n=d?"light":"dark";root.setAttribute("data-theme",n);try{localStorage.setItem("pltr-theme",n);}catch(e){}};})();
 
-(function(){const tabs=$$(".tab"),map={"t-live":"p-live","t-over":"p-over","t-fund":"p-fund","t-proj":"p-proj","t-edge":"p-edge","t-amd":"p-amd"};
+(function(){const tabs=$$(".tab"),map={"t-live":"p-live","t-over":"p-over","t-fund":"p-fund","t-proj":"p-proj","t-edge":"p-edge","t-amd":"p-amd","t-fil":"p-filings"};
   $$(".panel").forEach(p=>p.hidden=false);           // one-pager: every panel visible, tabs just jump
   tabs.forEach(t=>t.onclick=()=>{const el=$("#"+map[t.id]);if(el)el.scrollIntoView({behavior:"smooth",block:"start"});});
   const byPanel={};Object.entries(map).forEach(([tb,pn])=>byPanel[pn]=tb);
@@ -436,7 +647,13 @@ function render(st){
   if(sig.word){$("#sigWord").textContent=sig.word;$("#sigWord").className="sig-word "+(sig.cls||"side");
     $("#sigBias").textContent=sig.bias||"";$("#confFill").style.width=(sig.conf||0)+"%";
     $("#confVal").textContent=(sig.conf||0)+"% · "+(sig.confLabel||"");
-    $("#factors").innerHTML=(sig.factors||[]).map(f=>`<div class="factor glass-inset"><div class="k">${f[0]}</div><div class="v"><span class="arrow ${f[1]}">${f[1]==="u"?"▲":f[1]==="d"?"▼":"→"}</span><small>${f[2]}</small></div></div>`).join("");}
+    $("#factors").innerHTML=(sig.factors||[]).map(f=>{const g=factorKey(f[0]);
+    return `<div class="factor glass-inset"><div class="k">${esc(f[0])}${g?`<button class="ib" type="button" data-i="${g}" aria-label="What is this?" aria-expanded="false">i</button>`:""}</div><div class="v"><span class="arrow ${f[1]}">${f[1]==="u"?"▲":f[1]==="d"?"▼":"→"}</span><small>${esc(f[2])}</small></div></div>`;}).join("");}
+function factorKey(name){const n=(name||"").toLowerCase();
+  if(n.startsWith("trend"))return"trend"; if(n.startsWith("momentum"))return"momentum";
+  if(n.startsWith("order flow"))return"orderflow"; if(n.startsWith("basis"))return"basis";
+  if(n.startsWith("valuation"))return"valuationF"; if(n.startsWith("news"))return"sentiment";
+  if(n.startsWith("amd"))return"amd"; return"";}
   const tfs=sig.timeframes||[];
   $("#tfStrip").innerHTML=(tfs.length?tfs.map(t=>`<div class="tf ${t.cls}"><div class="t">${t.tf}</div><div class="w">${t.word}</div><div class="r">${t.ret!=null?(t.ret>=0?"+":"")+t.ret+"%":"warming"}</div></div>`).join(""):`<span class="muted" style="font-size:12px">warming up — 1–15M signals appear as live prices stream in</span>`);
 
@@ -459,7 +676,7 @@ function render(st){
   const nvenue=exs?Object.keys(exs).length:0;
   if(c.cumVolUsd||c.cumVol){$("#cumVol").textContent=`Cumulative 24h volume across ${nvenue} venue${nvenue!=1?"s":""}: ≈$${big(c.cumVolUsd||0)}  (${big(c.cumVol||0)} contracts/base)`;}
   else{$("#cumVol").textContent="";}
-  renderBook(c);renderTape(c);renderLarge(c);
+  window._lastCrypto=c;renderBook(c);renderTape(c);renderLarge(c);
 
   // ---- overview ----
   if(s.closes20&&s.closes20.length)drawChart(s.closes20);
@@ -516,27 +733,31 @@ function render(st){
     return `<a class="newsitem" href="${it.url||"#"}" target="_blank" rel="noopener"><div class="meta"><span class="src">${esc(src)}</span><span class="badge2 ${d}">${lbl}</span><span class="time">${time}${likes}</span></div><div class="hl">${esc(it.headline||"")}</div>${it.reason?`<div class="rz">${esc(it.reason)}</div>`:""}</a>`;}).join("")||`<div class="agentbar">No headlines yet — the agent runs every ~5 min.</div>`;
   $("#agentMsg").textContent=(ag.engine?("Engine: "+ag.engine):"")+(ag.xCount?` · ${ag.xCount} X posts`:"")+(meta.aiEnabled?"":" · add ANTHROPIC_API_KEY for full AI");
 
-  $("#footMeta").innerHTML=`Price pool: <b>${(meta.exchanges||[]).join(", ")||"—"}</b> · Depth: ${c.depthSource||"—"} · Stock: Yahoo · News: Google News RSS`+(meta.aiEnabled?` · AI: ${(''+ (ag.engine||'')).replace('anthropic:','')}`:"")+` · started ${meta.started?ago(new Date(meta.started).getTime())+" ago":"—"}`;
+  $("#footMeta").innerHTML=`Price pool: <b>${(meta.exchanges||[]).join(", ")||"—"}</b> · Depth: ${c.depthSource||"—"} · Stock: Yahoo · News: EDGAR + Yahoo + Nasdaq + Seeking Alpha + Google + StockTwits`+(meta.aiEnabled?` · AI: ${(''+ (ag.engine||'')).replace('anthropic:','')}`:"")+` · started ${meta.started?ago(new Date(meta.started).getTime())+" ago":"—"}`;
 }
 
 function renderBook(c){
-  const bids=c.bids||[],asks=c.asks||[];
-  const mx=Math.max(1,...bids.map(b=>b[1]),...asks.map(a=>a[1]));
-  $("#bookBids").innerHTML=bids.slice(0,12).map(([p,s])=>`<div class="brow bids"><span class="depth" style="width:${(s/mx*100).toFixed(0)}%"></span><span class="s mono">${num(s,2)}</span><span class="p mono">${money(p)}</span></div>`).join("")||`<div class="muted" style="padding:8px">—</div>`;
-  $("#bookAsks").innerHTML=asks.slice(0,12).map(([p,s])=>`<div class="brow asks"><span class="depth" style="width:${(s/mx*100).toFixed(0)}%"></span><span class="p mono">${money(p)}</span><span class="s mono">${num(s,2)}</span></div>`).join("")||`<div class="muted" style="padding:8px">—</div>`;
+  const bids=c.bids||[],asks=c.asks||[],U=UNITS==="usdt";
+  const w=([p,sz])=>U?p*sz:sz;                       // bar width follows the displayed unit
+  const mx=Math.max(1e-9,...bids.map(w),...asks.map(w));
+  $("#bookBids").innerHTML=bids.slice(0,12).map(([p,sz])=>`<div class="brow bids"><span class="depth" style="width:${(w([p,sz])/mx*100).toFixed(0)}%"></span><span class="s mono">${usz(p,sz)}</span><span class="p mono">${money(p)}</span></div>`).join("")||`<div class="muted" style="padding:8px">—</div>`;
+  $("#bookAsks").innerHTML=asks.slice(0,12).map(([p,sz])=>`<div class="brow asks"><span class="depth" style="width:${(w([p,sz])/mx*100).toFixed(0)}%"></span><span class="p mono">${money(p)}</span><span class="s mono">${usz(p,sz)}</span></div>`).join("")||`<div class="muted" style="padding:8px">—</div>`;
   const bv=c.bidVol||0,av=c.askVol||0,t=bv+av||1;
+  const mid=c.mark||c.price||(bids[0]&&asks[0]?(bids[0][0]+asks[0][0])/2:0)||0;
+  const fmt=U?(v=>money0(v*mid)):(v=>num(v,1)+" PLTR");
   $("#imbBar").style.width=(bv/t*100).toFixed(0)+"%";
-  $("#imbBid").textContent="Bids "+num(bv,1)+" ("+(bv/t*100).toFixed(0)+"%)";
-  $("#imbAsk").textContent="Asks "+num(av,1)+" ("+(av/t*100).toFixed(0)+"%)";
+  $("#imbBid").textContent="Bids "+fmt(bv)+" ("+(bv/t*100).toFixed(0)+"%)";
+  $("#imbAsk").textContent="Asks "+fmt(av)+" ("+(av/t*100).toFixed(0)+"%)";
 }
 function renderTape(c){
-  const tp=c.tape||[];
-  $("#tape").innerHTML=tp.map(t=>`<div class="trow ${t.side}${t.usd>=(largeThresh())?" big":""}"><span class="p mono">${money(t.px)}</span><span class="s mono">${num(t.sz,2)}</span><span class="side">${t.side}${t.block?' ▪':''}</span><span class="t mono">${money0(t.usd)}</span></div>`).join("")||`<div class="muted" style="padding:8px">No recent trades.</div>`;
+  const tp=c.tape||[],U=UNITS==="usdt";
+  $("#tape").innerHTML=tp.map(t=>`<div class="trow ${t.side}${t.usd>=(largeThresh())?" big":""}"><span class="p mono">${money(t.px)}</span><span class="s mono">${U?money0(t.usd):num(t.sz,2)}</span><span class="side">${t.side}${t.block?' ▪':''}</span><span class="t mono">${U?num(t.sz,2)+" PLTR":money0(t.usd)}</span></div>`).join("")||`<div class="muted" style="padding:8px">No recent trades.</div>`;
 }
 let _thr=3000;function largeThresh(){return _thr;}
 function renderLarge(c){
   const lg=c.large||[];$("#largeThresh").textContent="≥ "+money0(_thr);
-  $("#largeOrders").innerHTML=lg.length?`<div class="rows">`+lg.map(t=>`<div class="row"><span class="k mono">${money(t.px)} · ${num(t.sz,2)} sh</span><span class="v mono">${money0(t.usd)}<span class="tag2 ${t.side==="buy"?"up":"down"}">${t.side}</span></span></div>`).join("")+`</div>`:`<div class="muted" style="padding:6px 2px">No large prints in the current window.</div>`;
+  const U=UNITS==="usdt";
+  $("#largeOrders").innerHTML=lg.length?`<div class="rows">`+lg.map(t=>`<div class="row"><span class="k mono">${money(t.px)} · ${U?money0(t.usd):num(t.sz,2)+" PLTR"}</span><span class="v mono">${U?num(t.sz,2)+" PLTR":money0(t.usd)}<span class="tag2 ${t.side==="buy"?"up":"down"}">${t.side}</span></span></div>`).join("")+`</div>`:`<div class="muted" style="padding:6px 2px">No large prints in the current window.</div>`;
 }
 function renderProj(p){
   const mn=Math.min(p.low,p.bear)-4,mx=Math.max(p.high,p.bull)+4,sp=(mx-mn)||1,pos=v=>((v-mn)/sp*100);
@@ -609,60 +830,173 @@ function renderAmd(a){
     pj.innerHTML=t.map(r=>`<div class="tile glass-inset"><div class="k">${r[0]}</div><div class="v ${r[3]} mono">${r[1]}</div><div class="x">${r[2]}</div></div>`).join("");
   }
   M.textContent=`${a.venue||""} ${a.symbol||""} · 5m candles · ${a.day||""}`;
-  N.innerHTML=`<b>How to read it:</b> Asia builds the range (blue) — that high and low are the liquidity. London sweeps one side to trap traders (red): a sweep of the <b>low</b> is bullish, of the <b>high</b> bearish. New York expands in the true direction (green). The setup only counts once price <b>reclaims</b> back inside the range after the sweep — entry there, invalidation beyond the sweep, first target the opposite side of the range. Runs on the tokenized PLTR perp, the only PLTR market that trades through Asia and London.`;
+  N.innerHTML=`<b>How to read it:</b> Each session has its own high and low on the chart — <b style="color:#0a84ff">blue for Asia</b>, <b style="color:#e5342a">red for London</b>, <b style="color:#1aa851">green for New York</b>, and the amber line marks the sweep with the side it took. Asia builds the range (blue) — that high and low are the liquidity. London sweeps one side to trap traders (red): a sweep of the <b>low</b> is bullish, of the <b>high</b> bearish. New York expands in the true direction (green). The setup only counts once price <b>reclaims</b> back inside the range after the sweep — entry there, invalidation beyond the sweep, first target the opposite side of the range. Runs on the tokenized PLTR perp, the only PLTR market that trades through Asia and London.`;
 }
 function drawAmdChart(a){
+  const svg=$("#amdChart"); if(!svg)return;
   const cs=a.candles||[];
-  const W=720,H=340,padL=48,padR=66,padT=18,padB=26;
+  // size the drawing to the panel it actually sits in, 1 SVG unit = 1 CSS pixel
+  // measure the SVG itself, not its padded parent, so 1 unit really is 1 CSS pixel
+  const host=svg.parentElement;
+  const W=Math.max(520,Math.round(svg.getBoundingClientRect().width
+        || (host?host.clientWidth-40:0) || 900));
+  const H=Math.round(Math.min(640,Math.max(W<620?400:380,W*0.46)));
+  svg.setAttribute("viewBox",`0 0 ${W} ${H}`);
+  const wide=W>=860, med=W>=620;
+  const padL=56,padR=wide?152:med?100:66,padT=46,padB=36;
   const t0=a.dayStart||(cs[0]&&cs[0].t), tN=a.dayEnd||(cs.length&&cs[cs.length-1].t);
-  if(!t0||!tN){$("#amdChart").innerHTML="";return;}
+  if(!t0||!tN){svg.innerHTML="";return;}
   const span=(tN-t0)||1, P=a.projection||{}, now=a.nowMs||tN;
   let vals=[]; cs.forEach(c=>vals.push(c.h,c.l));
-  vals.push(a.asiaHigh,a.asiaLow); if(a.sweepPx!=null)vals.push(a.sweepPx);
+  vals.push(a.asiaHigh,a.asiaLow,a.londonHigh,a.londonLow,a.nyHigh,a.nyLow);
+  if(a.sweepPx!=null)vals.push(a.sweepPx);
   [P.up,P.down].forEach(o=>{if(o)vals.push(o.t1,o.t2);}); if(P.invalid!=null)vals.push(P.invalid);
   vals=vals.filter(v=>typeof v==="number"&&isFinite(v));
-  if(!vals.length){$("#amdChart").innerHTML="";return;}
+  if(!vals.length){svg.innerHTML="";return;}
   let mn=Math.min(...vals),mx=Math.max(...vals);
-  const pd=(mx-mn)*0.08||1; mn-=pd; mx+=pd; const rg=(mx-mn)||1;
+  const pd=(mx-mn)*0.07||1; mn-=pd; mx+=pd; const rg=(mx-mn)||1;
   const x=t=>padL+((t-t0)/span)*(W-padL-padR), y=v=>padT+(1-(v-mn)/rg)*(H-padT-padB);
-  const S=a.sessions||{};
-  // session bands — always drawn, whether or not that session is currently open
-  const band=(w,col,lab)=>{if(!w)return"";
-    const x1=Math.max(padL,x(w[0])),x2=Math.min(W-padR,x(w[1])); if(x2<=x1)return"";
-    const live=now>=w[0]&&now<w[1], done=now>=w[1];
-    return `<rect x="${x1.toFixed(1)}" y="${padT}" width="${(x2-x1).toFixed(1)}" height="${H-padT-padB}" fill="${col}" opacity="${live?0.17:done?0.09:0.05}"/>`
-      +(live?`<rect x="${x1.toFixed(1)}" y="${padT}" width="${(x2-x1).toFixed(1)}" height="2.5" fill="${col}"/>`:"")
-      +`<text x="${((x1+x2)/2).toFixed(1)}" y="${padT+12}" text-anchor="middle" font-size="9.5" fill="var(--ink-3)" font-weight="700">${lab}${live?" · OPEN":done?"":" · UPCOMING"}</text>`;};
+  const R=W-padR, S=a.sessions||{};
+
+  // ---- session bands, labelled in a strip ABOVE the plot so nothing sits on the candles
+  const band=(w,col,name,sub)=>{if(!w)return"";
+    const x1=Math.max(padL,x(w[0])),x2=Math.min(R,x(w[1])); if(x2-x1<2)return"";
+    const live=now>=w[0]&&now<w[1], done=now>=w[1], wide=(x2-x1);
+    const state=live?"OPEN":done?"CLOSED":"UPCOMING";
+    let t="";
+    if(wide>150)      t=`${name} · ${sub} · ${state}`;
+    else if(wide>82)  t=`${name} · ${state}`;
+    else if(wide>40)  t=name;
+    return `<rect x="${x1.toFixed(1)}" y="${padT}" width="${wide.toFixed(1)}" height="${(H-padT-padB).toFixed(1)}" fill="${col}" opacity="${live?0.13:done?0.07:0.035}"/>`
+      +`<rect x="${x1.toFixed(1)}" y="${(padT-13).toFixed(1)}" width="${wide.toFixed(1)}" height="${live?4:2.5}" rx="1.2" fill="${col}" opacity="${live?1:done?0.55:0.28}"/>`
+      +(t?`<text x="${((x1+x2)/2).toFixed(1)}" y="${(padT-20).toFixed(1)}" text-anchor="middle" font-size="10" letter-spacing="0.4" fill="${live?col:"var(--ink-3)"}" font-weight="700">${t}</text>`:"");};
+  const bands=band(S.asia,"#0a84ff","ASIA","accumulation")+band(S.london,"#e5342a","LONDON","manipulation")+band(S.ny,"#1aa851","NEW YORK","distribution");
+
+  // ---- grid + price axis
   let g="";
-  for(let i=0;i<=4;i++){const v=mn+rg*i/4,yy=y(v);
-    g+=`<line x1="${padL}" y1="${yy.toFixed(1)}" x2="${(W-padR).toFixed(1)}" y2="${yy.toFixed(1)}" stroke="var(--grid)"/><text x="${padL-6}" y="${(yy+3.5).toFixed(1)}" text-anchor="end" font-size="10" fill="var(--ink-3)" font-family="ui-monospace,monospace">${v.toFixed(1)}</text>`;}
-  // bottom time axis in EAT
-  let ax=""; for(let t=t0;t<=tN;t+=4*3600000){const xx=x(t); if(xx<padL-1||xx>W-padR+1)continue;
-    ax+=`<text x="${xx.toFixed(1)}" y="${H-8}" text-anchor="middle" font-size="9" fill="var(--ink-3)">${new Date(t).toLocaleTimeString("en-GB",{timeZone:"Africa/Nairobi",hour:"2-digit",minute:"2-digit"})}</text>`;}
-  const cw=Math.max(1,(W-padL-padR)/Math.max(cs.length,1)*0.75); let k="";
-  cs.forEach(c=>{const cx=x(c.t); if(cx<padL||cx>W-padR)return; const up=c.c>=c.o,col=up?"var(--up)":"var(--down)";
+  for(let i=0;i<=5;i++){const v=mn+rg*i/5,yy=y(v);
+    g+=`<line x1="${padL}" y1="${yy.toFixed(1)}" x2="${R.toFixed(1)}" y2="${yy.toFixed(1)}" stroke="var(--grid)"/>`
+      +`<text x="${padL-8}" y="${(yy+3.5).toFixed(1)}" text-anchor="end" font-size="10" fill="var(--ink-3)" font-family="ui-monospace,monospace">${v.toFixed(2)}</text>`;}
+  // ---- time axis (EAT), spaced to the available width
+  const stepH=span/3600000>26?4:span/3600000>14?2:1;
+  let ax=""; const d0=new Date(t0); d0.setMinutes(0,0,0);
+  for(let t=d0.getTime();t<=tN;t+=stepH*3600000){const xx=x(t); if(xx<padL-1||xx>R+1)continue;
+    ax+=`<line x1="${xx.toFixed(1)}" y1="${(H-padB).toFixed(1)}" x2="${xx.toFixed(1)}" y2="${(H-padB+4).toFixed(1)}" stroke="var(--grid)"/>`
+      +`<text x="${xx.toFixed(1)}" y="${(H-padB+16).toFixed(1)}" text-anchor="middle" font-size="9.5" fill="var(--ink-3)">${new Date(t).toLocaleTimeString("en-GB",{timeZone:"Africa/Nairobi",hour:"2-digit",minute:"2-digit"})}</text>`;}
+  ax+=`<text x="${R.toFixed(1)}" y="${(H-4).toFixed(1)}" text-anchor="end" font-size="9" fill="var(--ink-3)">times shown in EAT</text>`;
+
+  // ---- candles
+  const cw=Math.max(1.2,(W-padL-padR)/Math.max(cs.length,1)*0.72); let k="";
+  cs.forEach(c=>{const cx=x(c.t); if(cx<padL||cx>R)return; const up=c.c>=c.o,col=up?"var(--up)":"var(--down)";
     const yo=y(c.o),yc=y(c.c);
-    k+=`<line x1="${cx.toFixed(1)}" y1="${y(c.h).toFixed(1)}" x2="${cx.toFixed(1)}" y2="${y(c.l).toFixed(1)}" stroke="${col}" stroke-width="0.8"/><rect x="${(cx-cw/2).toFixed(1)}" y="${Math.min(yo,yc).toFixed(1)}" width="${cw.toFixed(1)}" height="${Math.max(1,Math.abs(yc-yo)).toFixed(1)}" fill="${col}"/>`;});
-  const hl=(v,col,dash,lab)=>v==null?"":`<line x1="${padL}" y1="${y(v).toFixed(1)}" x2="${(W-padR).toFixed(1)}" y2="${y(v).toFixed(1)}" stroke="${col}" stroke-width="1.2" stroke-dasharray="${dash}"/><text x="${(W-padR-2).toFixed(1)}" y="${(y(v)-3).toFixed(1)}" text-anchor="end" font-size="9.5" fill="${col}" font-weight="700">${lab}</text>`;
-  let ln=hl(a.asiaHigh,"var(--accent)","4 3","Asia high "+money(a.asiaHigh))+hl(a.asiaLow,"var(--accent)","4 3","Asia low "+money(a.asiaLow));
-  if(a.sweepPx!=null)ln+=hl(a.sweepPx,"var(--down)","2 3","sweep "+money(a.sweepPx));
-  if(P.invalid!=null)ln+=hl(P.invalid,"var(--down)","1 3","invalid "+money(P.invalid));
-  // forward projection cones from NOW to the end of the NY session
+    k+=`<line x1="${cx.toFixed(1)}" y1="${y(c.h).toFixed(1)}" x2="${cx.toFixed(1)}" y2="${y(c.l).toFixed(1)}" stroke="${col}" stroke-width="0.9"/>`
+      +`<rect x="${(cx-cw/2).toFixed(1)}" y="${Math.min(yo,yc).toFixed(1)}" width="${cw.toFixed(1)}" height="${Math.max(1,Math.abs(yc-yo)).toFixed(1)}" fill="${col}"/>`;});
+
+  // ---- level lines: blue = Asia, red = London, green = New York, amber = the sweep
+  const ASIA="#0a84ff",LDN="#e5342a",NYC="#1aa851",SWP="#c08a00";
+  const marks=[], swp=a.sweepPx;
+  const dupSweep=v=>swp!=null&&v!=null&&Math.abs(v-swp)<0.005;   // the sweep IS that session's extreme
+  const nm=(long,short)=>wide?long:med?short:"";
+  const add=(v,col,lab,dash,from)=>{ if(v==null||!isFinite(v))return;
+    marks.push({v,y:y(v),col,lab:(lab?lab+" ":"")+money(v),dash,
+                from:from==null?padL:Math.max(padL,x(from))}); };
+  add(a.asiaHigh,ASIA,nm("Asia high","A hi"),"5 4",S.asia&&S.asia[0]);
+  add(a.asiaLow ,ASIA,nm("Asia low","A lo") ,"5 4",S.asia&&S.asia[0]);
+  if(!dupSweep(a.londonHigh))add(a.londonHigh,LDN,nm("London high","L hi"),"5 4",S.london&&S.london[0]);
+  if(!dupSweep(a.londonLow ))add(a.londonLow ,LDN,nm("London low","L lo") ,"5 4",S.london&&S.london[0]);
+  if(!dupSweep(a.nyHigh))add(a.nyHigh,NYC,nm("NY high","NY hi"),"5 4",S.ny&&S.ny[0]);
+  if(!dupSweep(a.nyLow ))add(a.nyLow ,NYC,nm("NY low","NY lo") ,"5 4",S.ny&&S.ny[0]);
+  if(swp!=null)add(swp,SWP,wide?`SWEPT ${(a.swept||"").toUpperCase()}`:med?`SWEPT ${(a.swept||"").toUpperCase()}`:"SWP","2 3",a.sweepT);
+  if(P.invalid!=null&&!dupSweep(P.invalid))add(P.invalid,"var(--ink-3)",nm("invalid","inv"),"1 4");
+  let ln=marks.map(m=>`<line x1="${m.from.toFixed(1)}" y1="${m.y.toFixed(1)}" x2="${R.toFixed(1)}" y2="${m.y.toFixed(1)}" stroke="${m.col}" stroke-width="1.3" stroke-dasharray="${m.dash}" opacity="0.95"/>`).join("");
+  // push overlapping right-edge labels apart instead of letting them stack on each other
+  const lab=[...marks].sort((p,q)=>p.y-q.y); const GAP=13.5;
+  let prev=-1e9; lab.forEach(m=>{m.ly=Math.max(m.y,prev+GAP);prev=m.ly;});
+  let floor=H-padB-3;
+  for(let i=lab.length-1;i>=0;i--){ if(lab[i].ly>floor)lab[i].ly=floor; floor=lab[i].ly-GAP; }
+  ln+=lab.map(m=>{
+      const lx=R+6, leader=Math.abs(m.ly-m.y)>1.5
+        ?`<path d="M${R.toFixed(1)} ${m.y.toFixed(1)} L${(R+4).toFixed(1)} ${m.ly.toFixed(1)}" stroke="${m.col}" stroke-width="0.8" fill="none" opacity="0.6"/>`:"";
+      return leader+`<text x="${lx.toFixed(1)}" y="${(m.ly+3.4).toFixed(1)}" font-size="${wide?9.5:8.6}" fill="${m.col}" font-weight="700">${m.lab}</text>`;
+    }).join("");
+
+  // ---- forward projection cones from NOW to the end of New York
   const cone=(o,col)=>{if(!o||P.from==null)return"";
-    const x1=x(now),x2=W-padR,y0=y(P.from),y1=y(o.t1),y2=y(o.t2);
-    return `<polygon points="${x1.toFixed(1)},${y0.toFixed(1)} ${x2.toFixed(1)},${y1.toFixed(1)} ${x2.toFixed(1)},${y2.toFixed(1)}" fill="${col}" opacity="0.15"/>`
-      +`<line x1="${x1.toFixed(1)}" y1="${y0.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y1.toFixed(1)}" stroke="${col}" stroke-width="1.4" stroke-dasharray="5 3"/>`
-      +`<line x1="${x1.toFixed(1)}" y1="${y0.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="${col}" stroke-width="1" stroke-dasharray="2 4"/>`
-      +`<text x="${(x2+3).toFixed(1)}" y="${(y1+3).toFixed(1)}" font-size="9.5" fill="${col}" font-weight="700">${money(o.t1)}</text>`
-      +`<text x="${(x2+3).toFixed(1)}" y="${(y2+3).toFixed(1)}" font-size="9" fill="${col}">${money(o.t2)}</text>`;};
+    const x1=x(now),x2=R,y0=y(P.from),y1=y(o.t1),y2=y(o.t2);
+    if(x2-x1<4)return"";
+    return `<polygon points="${x1.toFixed(1)},${y0.toFixed(1)} ${x2.toFixed(1)},${y1.toFixed(1)} ${x2.toFixed(1)},${y2.toFixed(1)}" fill="${col}" opacity="0.14"/>`
+      +`<line x1="${x1.toFixed(1)}" y1="${y0.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y1.toFixed(1)}" stroke="${col}" stroke-width="1.4" stroke-dasharray="6 4"/>`
+      +`<line x1="${x1.toFixed(1)}" y1="${y0.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="${col}" stroke-width="1" stroke-dasharray="2 5"/>`;};
   const cones=cone(P.up,"var(--up)")+cone(P.down,"var(--down)");
-  const nowLine=`<line x1="${x(now).toFixed(1)}" y1="${padT}" x2="${x(now).toFixed(1)}" y2="${(H-padB).toFixed(1)}" stroke="var(--ink)" stroke-width="1.2" stroke-dasharray="3 3"/><text x="${(x(now)+3).toFixed(1)}" y="${(H-padB-4).toFixed(1)}" font-size="9" fill="var(--ink-2)" font-weight="700">NOW</text>`;
+
+  const nx=x(now);
+  const nowRight=nx<R-42;
+  const nowLine=`<line x1="${nx.toFixed(1)}" y1="${padT}" x2="${nx.toFixed(1)}" y2="${(H-padB).toFixed(1)}" stroke="var(--ink)" stroke-width="1.2" stroke-dasharray="3 3"/>`
+    +`<rect x="${(nowRight?nx+3:nx-35).toFixed(1)}" y="${(H-padB-15).toFixed(1)}" width="32" height="13" rx="3" fill="var(--ink)" opacity="0.9"/>`
+    +`<text x="${(nowRight?nx+19:nx-19).toFixed(1)}" y="${(H-padB-5.5).toFixed(1)}" text-anchor="middle" font-size="8.5" fill="var(--bg-0)" font-weight="800">NOW</text>`;
+
   let mk="";
-  if(a.sweepT&&a.sweepPx!=null)mk+=`<circle cx="${x(a.sweepT).toFixed(1)}" cy="${y(a.sweepPx).toFixed(1)}" r="3.5" fill="var(--down)" stroke="var(--bg-0)" stroke-width="1.5"/>`;
-  if(a.reclaimT)mk+=`<circle cx="${x(a.reclaimT).toFixed(1)}" cy="${y(a.bias==="bullish"?a.asiaLow:a.asiaHigh).toFixed(1)}" r="3.5" fill="var(--up)" stroke="var(--bg-0)" stroke-width="1.5"/>`;
-  $("#amdChart").innerHTML=band(S.asia,"#0a84ff","ASIA · accumulation")+band(S.london,"#e5342a","LONDON · manipulation")+band(S.ny,"#1aa851","NEW YORK · distribution")+g+ax+k+ln+cones+nowLine+mk;
-  $("#amdLegend").innerHTML=`<span><i class="swatch" style="background:#0a84ff"></i>Asia</span><span><i class="swatch" style="background:#e5342a"></i>London</span><span><i class="swatch" style="background:#1aa851"></i>New York</span><span><i class="swatch" style="background:var(--ink-3)"></i>projection</span>`;
+  if(a.sweepT&&a.sweepPx!=null){
+    const sx=x(a.sweepT),sy=y(a.sweepPx),lowSide=a.swept==="low";
+    mk+=`<circle cx="${sx.toFixed(1)}" cy="${sy.toFixed(1)}" r="4.5" fill="${SWP}" stroke="var(--bg-0)" stroke-width="1.8"/>`
+      +`<text x="${sx.toFixed(1)}" y="${(sy+(lowSide?16:-9)).toFixed(1)}" text-anchor="middle" font-size="9.5" font-weight="800" fill="${SWP}">SWEPT ${lowSide?"LOW":"HIGH"}</text>`;}
+  if(a.reclaimT){const rx=x(a.reclaimT),ry=y(a.bias==="bullish"?a.asiaLow:a.asiaHigh);
+    mk+=`<circle cx="${rx.toFixed(1)}" cy="${ry.toFixed(1)}" r="4" fill="var(--up)" stroke="var(--bg-0)" stroke-width="1.8"/>`
+      +`<text x="${rx.toFixed(1)}" y="${(ry+(a.bias==="bullish"?-9:16)).toFixed(1)}" text-anchor="middle" font-size="9.5" font-weight="800" fill="var(--up)">RECLAIM</text>`;}
+
+  svg.innerHTML=bands+g+ax+k+ln+cones+nowLine+mk;
+  $("#amdLegend").innerHTML=[["#0a84ff","Asia high / low"],["#e5342a","London high / low"],
+      ["#1aa851","New York high / low"],["#c08a00","sweep"],["var(--ink-3)","projection"]]
+    .map(l=>`<span class="lg"><i class="swatch" style="background:${l[0]}"></i>${l[1]}</span>`).join("");
 }
+/* ---------------- Insiders & Congress ---------------- */
+async function pullFilings(){
+  try{const r=await fetch("/api/filings",{cache:"no-store"});renderFilings(await r.json());}
+  catch(e){}
+}
+function frow(x){
+  const side=x.side==="buy"?"buy":x.side==="sell"?"sell":"other";
+  const lbl=x.kind==="insider"?(x.codeLabel||side):(side==="buy"?"Buy":side==="sell"?"Sell":(x.typeRaw||"—"));
+  const amt=x.kind==="insider"
+    ? (x.value!=null?money0(x.value):(x.shares!=null?num(x.shares)+" sh":"—"))
+      +(x.shares!=null&&x.price!=null?`<span class="role"> ${num(x.shares)} sh @ ${money(x.price)}</span>`:"")
+    : (esc(x.amount)||"—");
+  const when=x.txDate?`${esc(x.txDate)}<span class="role"> filed ${esc(x.filedDate)||"—"}</span>`:(esc(x.filedDate)||"—");
+  const role=[x.role,x.state,x.owner&&x.owner!=="--"?x.owner:""].filter(Boolean).join(" · ");
+  const tag=x.url?"a":"div";
+  return `<${tag} class="fr"${x.url?` href="${esc(x.url)}" target="_blank" rel="noopener"`:""}>
+    <span><span class="who">${esc(x.who||"—")}</span><br><span class="role">${esc(role)||"—"}</span></span>
+    <span class="pill ${side}">${esc(lbl)}</span>
+    <span class="amt mono">${amt}</span>
+    <span class="when mono">${when}</span></${tag}>`;
+}
+function renderFilings(f){
+  const el=id=>document.getElementById(id);
+  if(!el("filIns"))return;
+  const ins=(f&&f.insiders)||[], con=(f&&f.congress)||[], sm=(f&&f.summary)||{};
+  el("filAsOf").textContent=f&&f.asOf?("checked "+ago(Date.parse(f.asOf))+" ago"):"";
+  const ic=sm.insiders||{},cc=sm.congress||{};
+  const netUsd=(sm.insiderBuyUsd||0)-(sm.insiderSellUsd||0);
+  el("filSum").innerHTML=[
+    ["Insider buys",ic.buys??0,"open-market, Form 4","up"],
+    ["Insider sells",ic.sells??0,"open-market, Form 4","down"],
+    ["Insider net $",(sm.insiderBuyUsd||sm.insiderSellUsd)?money0(netUsd):"—","buys − sells",netUsd>=0?"up":"down"],
+    ["Congress buys",cc.buys??0,"STOCK Act","up"],
+    ["Congress sells",cc.sells??0,"STOCK Act","down"],
+    ["Members filing",sm.people??0,"distinct names",""]
+  ].map(t=>`<div class="tile glass-inset"><div class="k">${t[0]}</div><div class="v ${t[3]} mono">${t[1]}</div><div class="x">${t[2]}</div></div>`).join("");
+  el("filIns").innerHTML=ins.length?`<div class="fl">${ins.map(frow).join("")}</div>`
+    :`<div class="emptybox">No Form 4 rows loaded yet. The desk re-checks SEC EDGAR every 30 minutes; if this stays empty, the host cannot reach <b>data.sec.gov</b>.</div>`;
+  el("filCon").innerHTML=con.length?`<div class="fl">${con.map(frow).join("")}</div>`
+    :`<div class="emptybox">No congressional PLTR trades in the current dataset. Members only appear once they have actually filed a periodic transaction report naming PLTR — there are often none for months at a time.</div>`;
+}
+
+(function(){let t;const redraw=()=>{clearTimeout(t);t=setTimeout(()=>{if(AMDDATA&&AMDDATA.ok)drawAmdChart(AMDDATA);},160);};
+  addEventListener("resize",redraw);addEventListener("orientationchange",redraw);
+  const host=document.querySelector("#amdChart")&&document.querySelector("#amdChart").parentElement;
+  if(host&&window.ResizeObserver)new ResizeObserver(redraw).observe(host);})();
+
+pullFilings();setInterval(pullFilings,300000);
 pullAmd();setInterval(pullAmd,20000);
 tick();setInterval(tick,1000);
 </script>

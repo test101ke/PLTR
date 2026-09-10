@@ -19,11 +19,19 @@ services:
       - key: LARGE_TRADE_USD
         value: "3000"
       - key: FAST_INTERVAL
-        value: "2"
+        value: "1"
+      - key: DEPTH_INTERVAL
+        value: "3"
       - key: STOCK_INTERVAL
         value: "30"
+      - key: NEWS_INTERVAL
+        value: "8"
       - key: AGENT_INTERVAL
-        value: "300"
+        value: "60"
+      - key: AMD_INTERVAL
+        value: "60"
+      - key: FILINGS_INTERVAL
+        value: "1800"
       # Optional overrides if auto-discovery ever misses the symbol:
       # - key: BYBIT_SYMBOL
       #   value: PLTRXUSDT

@@ -69,6 +69,16 @@ def compute(candles, venue=None, symbol=None, now_ms=None):
     asia_low = min(c["l"] for c in a if c["l"])
     rng = asia_high - asia_low
 
+    # Each session's own extremes, so the chart can draw all three ranges, not just Asia.
+    def _hl(rows):
+        hs = [c["h"] for c in rows if c["h"]]
+        ls = [c["l"] for c in rows if c["l"]]
+        if not hs or not ls:
+            return None, None
+        return round(max(hs), 2), round(min(ls), 2)
+    london_high, london_low = _hl(l)
+    ny_high, ny_low = _hl(n)
+
     # ---- phase ----
     if now_ms < asia_w[1]:
         phase, phase_label = "A", "Accumulation (Asia)"
@@ -188,6 +198,8 @@ def compute(candles, venue=None, symbol=None, now_ms=None):
         "dayStart": asia_w[0], "dayEnd": ny_w[1], "nowMs": now_ms, "projection": projection,
         "phase": phase, "phaseLabel": phase_label,
         "asiaHigh": round(asia_high, 2), "asiaLow": round(asia_low, 2), "range": round(rng, 2),
+        "londonHigh": london_high, "londonLow": london_low,
+        "nyHigh": ny_high, "nyLow": ny_low,
         "swept": swept, "sweepPx": round(sweep_px, 2) if sweep_px else None, "sweepT": sweep_t,
         "bias": bias, "reclaimed": reclaimed, "reclaimT": reclaim_t, "expanded": expanded,
         "levels": levels, "last": last, "status": status,

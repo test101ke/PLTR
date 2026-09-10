@@ -36,6 +36,9 @@ from fastapi.staticfiles import StaticFiles
 import backtest as bt
 import exchanges as ex
 import amd as amdlib
+import newsfeed
+import google_news
+import filings as filinglib
 
 # ---------------------------------------------------------------- config
 CFG = {
@@ -48,7 +51,9 @@ CFG = {
     "FAST_INTERVAL": float(os.getenv("FAST_INTERVAL", "1")),      # rotating price, ~instant
     "DEPTH_INTERVAL": float(os.getenv("DEPTH_INTERVAL", "3")),    # order book / tape / 1m klines
     "STOCK_INTERVAL": float(os.getenv("STOCK_INTERVAL", "30")),
-    "NEWS_INTERVAL": float(os.getenv("NEWS_INTERVAL", "15")),     # fast headline pull
+    "NEWS_INTERVAL": float(os.getenv("NEWS_INTERVAL", "8")),      # fast multi-source headline pull
+    "FILINGS_INTERVAL": float(os.getenv("FILINGS_INTERVAL", "1800")),  # congress + SEC Form 4
+    "GOOGLE_INTERVAL": float(os.getenv("GOOGLE_INTERVAL", "300")),     # Google News scrape (rate-limit friendly)
     "AGENT_INTERVAL": float(os.getenv("AGENT_INTERVAL", "60")),   # AI enrich (thesis + rescoring)
 }
 UA = {"User-Agent": "Mozilla/5.0 (PLTR-Signal-Desk)"}
@@ -67,6 +72,7 @@ STATE: dict[str, Any] = {
     "signal": {},     # composite call
     "backtest": {},   # open-window edge study
     "amd": {},        # AMD / Power-of-3 summary (full payload at /api/amd)
+    "filings": {},    # congress (STOCK Act) + SEC Form 4 insider trades
 }
 _LOCK = asyncio.Lock()
 _client: Optional[httpx.AsyncClient] = None
@@ -75,6 +81,7 @@ from collections import deque
 _LIVE = deque(maxlen=1400)   # (epoch_seconds, mark_price) for short-timeframe signals
 _ROT = {"i": 0, "live": []}  # rotating exchange price pool
 AMD = {}                     # full AMD / Power-of-3 payload (served at /api/amd)
+_GOOGLE: list[dict] = []     # newest Google News scrape, refreshed on its own 5-min loop
 
 
 def now_iso() -> str:
@@ -531,28 +538,74 @@ def _pub_ms(pub: str):
     except Exception:
         return None
 
+async def run_google_news():
+    """SLOW loop (5 min): scrape Google News across several tight recency windows.
+
+    Google ranks by relevance and rate-limits hard, so it gets its own cadence —
+    hammering it every few seconds is what made the feed look frozen."""
+    global _GOOGLE
+    try:
+        items = await google_news.fetch(_client, limit=30)
+    except Exception as e:
+        async with _LOCK:
+            STATE["meta"]["errors"]["google"] = str(e)[:120]
+        return
+    if items:
+        async with _LOCK:
+            _GOOGLE = items
+            STATE["meta"]["googleAsOf"] = now_iso()
+            STATE["meta"]["googleCount"] = len(items)
+            STATE["meta"]["errors"].pop("google", None)
+    else:
+        async with _LOCK:
+            STATE["meta"]["errors"]["google"] = "no items returned (rate-limited or blocked)"
+
+
+def _merge_news(*pools, limit=28) -> list[dict]:
+    """Merge every source, de-duplicate on the headline, newest first."""
+    seen, out = set(), []
+    flat = [it for pool in pools for it in (pool or [])]
+    for it in sorted(flat, key=lambda x: x.get("ts") or 0, reverse=True):
+        k = newsfeed._norm(it.get("headline"))
+        if not k or k in seen:
+            continue
+        seen.add(k)
+        out.append(dict(it))
+        if len(out) >= limit:
+            break
+    return out
+
+
 async def fetch_news_rss() -> list[dict]:
-    url = ("https://news.google.com/rss/search?q=Palantir%20OR%20PLTR%20stock%20when:7d"
-           "&hl=en-US&gl=US&ceid=US:en")
-    r = await get(url)
-    items = []
+    """Fast feeds (EDGAR, Yahoo, Nasdaq, Seeking Alpha, StockTwits) merged with the
+    most recent Google News scrape. A headline shows the moment ANY source prints it."""
+    try:
+        fast = await newsfeed.fetch_all(_client, limit=25)
+    except Exception:
+        fast = []
+    async with _LOCK:
+        goog = list(_GOOGLE)
+    merged = _merge_news(goog, fast)
+    if merged:
+        return merged
+    # last-ditch fallback: one plain Google News query
+    r = await get("https://news.google.com/rss/search?q=Palantir%20OR%20PLTR%20stock%20when:2d"
+                  "&hl=en-US&gl=US&ceid=US:en")
+    out = []
     if not r:
-        return items
+        return out
     try:
         root = ET.fromstring(r.text)
         for it in root.iter("item"):
-            title = (it.findtext("title") or "").strip()
-            link = (it.findtext("link") or "").strip()
             pub = (it.findtext("pubDate") or "").strip()
-            src_el = it.find("{*}source")
-            src = (src_el.text if src_el is not None else "") or "News"
-            items.append({"headline": title, "url": link, "pub": pub, "ts": _pub_ms(pub),
-                          "src": src, "kind": "news"})
-            if len(items) >= 12:
+            out.append({"headline": (it.findtext("title") or "").strip(),
+                        "url": (it.findtext("link") or "").strip(),
+                        "pub": pub, "ts": _pub_ms(pub), "src": "Google News", "kind": "news"})
+            if len(out) >= 15:
                 break
     except Exception:
         pass
-    return items
+    return out
 
 
 async def fetch_x() -> list[dict]:
@@ -615,6 +668,19 @@ async def poll_amd():
     recompute_signal()
 
 
+async def poll_filings():
+    """Who else is trading PLTR: US politicians (STOCK Act) + company insiders (Form 4)."""
+    res = await filinglib.fetch_all(_client)
+    async with _LOCK:
+        if res.get("ok") or not STATE.get("filings"):
+            STATE["filings"] = res
+        STATE["meta"]["filingsAsOf"] = now_iso()
+        if not res.get("ok"):
+            STATE["meta"]["errors"]["filings"] = "disclosure sources unreachable"
+        else:
+            STATE["meta"]["errors"].pop("filings", None)
+
+
 async def run_backtest_job():
     days = int(os.getenv("BT_DAYS", "200"))
     res = await bt.run_backtest(days=days)
@@ -626,8 +692,16 @@ async def run_news():
     """FAST loop: pull headlines + tweets and keyword-score them so the feed is near-live."""
     news = await fetch_news_rss()
     tweets = await fetch_x()
+    # the AI loop runs every 60s but this one every 8s — carry its verdicts across
+    # instead of overwriting them with the keyword fallback each pass
+    prior = {n.get("headline"): n for n in STATE["news"]}
     for it in news:
-        it["dir"] = keyword_dir(it["headline"]); it.setdefault("reason", "")
+        old = prior.get(it["headline"])
+        if old and old.get("aiScored"):
+            it["dir"] = old.get("dir", "flat"); it["reason"] = old.get("reason", "")
+            it["aiScored"] = True
+        else:
+            it["dir"] = keyword_dir(it["headline"]); it.setdefault("reason", "")
     scored_tw = [{"kind": "tweet", "src": ("@" + t["user"]) if t.get("user") else "X",
                   "headline": t["text"], "url": t.get("url", ""), "ts": t.get("ts"),
                   "dir": keyword_dir(t["text"]), "likes": t.get("likes", 0), "reason": ""} for t in tweets]
@@ -668,6 +742,7 @@ async def run_agent():
             m = by.get(n.get("headline"))
             if m:
                 n["dir"] = m.get("dir", n.get("dir", "flat")); n["reason"] = m.get("reason", "")
+                n["aiScored"] = True
         cu = sum(1 for x in STATE["news"] if x.get("dir") == "up")
         cd = sum(1 for x in STATE["news"] if x.get("dir") == "down")
         cf = sum(1 for x in STATE["news"] if x.get("dir") == "flat")
@@ -857,17 +932,21 @@ async def lifespan(app: FastAPI):
     await poll_stock()
     await poll_depth()
     await rotate_price()
+    await run_google_news()
     await run_news()
     await run_agent()
     await poll_amd()
+    asyncio.create_task(poll_filings())   # slow + large; don't block startup
     bt_interval = float(os.getenv("BT_INTERVAL", "86400"))
     tasks = [
         asyncio.create_task(loop(rotate_price, CFG["FAST_INTERVAL"], "price")),
         asyncio.create_task(loop(poll_depth, CFG["DEPTH_INTERVAL"], "depth")),
         asyncio.create_task(loop(poll_stock, CFG["STOCK_INTERVAL"], "stock")),
         asyncio.create_task(loop(run_news, CFG["NEWS_INTERVAL"], "news")),
+        asyncio.create_task(loop(run_google_news, CFG["GOOGLE_INTERVAL"], "google")),
         asyncio.create_task(loop(run_agent, CFG["AGENT_INTERVAL"], "agent")),
         asyncio.create_task(loop(poll_amd, float(os.getenv("AMD_INTERVAL", "60")), "amd")),
+        asyncio.create_task(loop(poll_filings, CFG["FILINGS_INTERVAL"], "filings")),
         asyncio.create_task(loop(run_backtest_job, bt_interval, "backtest")),
     ]
     try:
@@ -893,6 +972,12 @@ async def api_amd():
         return JSONResponse(json.loads(json.dumps(AMD, default=str)))
 
 
+@app.get("/api/filings")
+async def api_filings():
+    async with _LOCK:
+        return JSONResponse(json.loads(json.dumps(STATE["filings"], default=str)))
+
+
 @app.get("/api/backtest")
 async def api_backtest():
     async with _LOCK:
@@ -909,6 +994,25 @@ async def api_backtest_run():
 async def healthz():
     return {"ok": True, "cryptoAsOf": STATE["meta"]["cryptoAsOf"],
             "stockAsOf": STATE["meta"]["stockAsOf"]}
+
+
+@app.get("/sw.js")
+async def sw():
+    # must be served from the site root so the service worker's scope covers "/"
+    return FileResponse(os.path.join(HERE, "static", "sw.js"),
+                        media_type="application/javascript",
+                        headers={"Cache-Control": "no-cache", "Service-Worker-Allowed": "/"})
+
+
+@app.get("/manifest.webmanifest")
+async def manifest():
+    return FileResponse(os.path.join(HERE, "static", "manifest.webmanifest"),
+                        media_type="application/manifest+json")
+
+
+@app.get("/favicon.ico")
+async def favicon():
+    return FileResponse(os.path.join(HERE, "static", "favicon.ico"), media_type="image/x-icon")
 
 
 @app.get("/")
