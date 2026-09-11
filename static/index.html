@@ -17,376 +17,460 @@
 <meta name="apple-mobile-web-app-title" content="PLTR Desk">
 <meta name="description" content="Live Palantir trading desk — composite signal, order book, AMD sessions, fast news and insider/congress disclosures.">
 <style>
+/* ---------------------------------------------------------------------------
+   PLTR Signal Desk — visual system
+   Apple-flavoured: one accent, hairlines instead of boxes, colour only where it
+   carries meaning (up / down), generous air, and a tight type scale.
+   --------------------------------------------------------------------------- */
 :root{
-  --bg-0:#eef1f6;--bg-1:#e5e9f0;
-  --mesh-a:rgba(10,132,255,.08);--mesh-b:rgba(94,92,230,.06);--mesh-c:rgba(48,209,88,.05);
-  --glass:rgba(255,255,255,.72);--glass-2:rgba(255,255,255,.5);--glass-hi:rgba(255,255,255,.95);
-  --stroke:rgba(15,20,32,.08);--stroke-2:rgba(15,20,32,.05);
-  --shadow:0 1px 2px rgba(18,24,40,.04),0 10px 26px -18px rgba(18,24,40,.22);
-  --ink:#0d1220;--ink-2:#414b60;--ink-3:#6c7689;
-  --accent:#0a84ff;--accent-soft:rgba(10,132,255,.14);
-  --up:#1aa851;--up-soft:rgba(26,168,81,.14);--down:#e5342a;--down-soft:rgba(229,52,42,.13);
-  --flat:#c08a00;--flat-soft:rgba(192,138,0,.14);--grid:rgba(15,20,32,.09);
-  --glass-strong:rgba(255,255,255,.9);
+  --bg:#f5f5f7; --bg-2:#ececf0;
+  --card:rgba(255,255,255,.82); --card-solid:#fff; --fill:rgba(118,118,128,.08); --fill-2:rgba(118,118,128,.12);
+  --line:rgba(60,60,67,.13); --line-2:rgba(60,60,67,.07);
+  --ink:#1d1d1f; --ink-2:#4b4b50; --ink-3:#86868b;
+  --accent:#0071e3; --accent-soft:rgba(0,113,227,.10);
+  --up:#00875a; --up-soft:rgba(0,135,90,.10);
+  --down:#d70015; --down-soft:rgba(215,0,21,.09);
+  --flat:#9a6700; --flat-soft:rgba(154,103,0,.10);
+  --grid:rgba(60,60,67,.10);
+  --bar:rgba(255,255,255,.95);
+  --shadow:0 0 0 .5px rgba(0,0,0,.04), 0 8px 28px -20px rgba(0,0,0,.30);
+  --r-lg:18px; --r-md:12px; --r-sm:9px;
+  --rail:clamp(320px,22vw,400px); --hdr:66px;
 }
-@media (prefers-color-scheme:dark) and (min-width:99999px){:root:not([data-theme="light"]){
-  --bg-0:#070a10;--bg-1:#0a0e17;--mesh-a:rgba(10,132,255,.26);--mesh-b:rgba(120,90,255,.20);--mesh-c:rgba(48,209,88,.12);
-  --glass:rgba(24,29,41,.55);--glass-2:rgba(30,36,50,.4);--glass-hi:rgba(255,255,255,.06);
-  --stroke:rgba(255,255,255,.12);--stroke-2:rgba(255,255,255,.06);
-  --shadow:0 18px 46px -18px rgba(0,0,0,.7),0 2px 10px -4px rgba(0,0,0,.5);
-  --ink:#f3f5fa;--ink-2:#b6bfd2;--ink-3:#7f8aa1;--accent:#3d9bff;--accent-soft:rgba(61,155,255,.18);
-  --up:#32d158;--up-soft:rgba(50,209,88,.16);--down:#ff5b52;--down-soft:rgba(255,91,82,.16);
-  --flat:#ffd426;--flat-soft:rgba(255,212,38,.15);--grid:rgba(255,255,255,.08);--glass-strong:rgba(18,22,32,.9);
-}}
+/* true black, not charcoal — cards sit just off the background, separated by a
+   hairline rather than by a lighter grey fill */
 :root[data-theme="dark"]{
-  --bg-0:#070a10;--bg-1:#0a0e17;--mesh-a:rgba(10,132,255,.26);--mesh-b:rgba(120,90,255,.20);--mesh-c:rgba(48,209,88,.12);
-  --glass:rgba(24,29,41,.55);--glass-2:rgba(30,36,50,.4);--glass-hi:rgba(255,255,255,.06);
-  --stroke:rgba(255,255,255,.12);--stroke-2:rgba(255,255,255,.06);
-  --shadow:0 18px 46px -18px rgba(0,0,0,.7),0 2px 10px -4px rgba(0,0,0,.5);
-  --ink:#f3f5fa;--ink-2:#b6bfd2;--ink-3:#7f8aa1;--accent:#3d9bff;--accent-soft:rgba(61,155,255,.18);
-  --up:#32d158;--up-soft:rgba(50,209,88,.16);--down:#ff5b52;--down-soft:rgba(255,91,82,.16);
-  --flat:#ffd426;--flat-soft:rgba(255,212,38,.15);--grid:rgba(255,255,255,.08);--glass-strong:rgba(18,22,32,.9);
+  --bg:#000; --bg-2:#000;
+  --card:rgba(14,14,16,.86); --card-solid:#0e0e10;
+  --fill:rgba(255,255,255,.055); --fill-2:rgba(255,255,255,.09);
+  --line:rgba(255,255,255,.11); --line-2:rgba(255,255,255,.055);
+  --ink:#f5f5f7; --ink-2:#b9b9c0; --ink-3:#78787f;
+  --accent:#0a84ff; --accent-soft:rgba(10,132,255,.16);
+  --up:#30d158; --up-soft:rgba(48,209,88,.14);
+  --down:#ff453a; --down-soft:rgba(255,69,58,.14);
+  --flat:#ffd60a; --flat-soft:rgba(255,214,10,.12);
+  --grid:rgba(255,255,255,.08);
+  --bar:rgba(6,6,8,.95);
+  --shadow:0 0 0 .5px rgba(255,255,255,.05), 0 8px 30px -22px rgba(0,0,0,1);
 }
 *{box-sizing:border-box}
-body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","SF Pro Display","Helvetica Neue",Arial,system-ui,sans-serif;
-  color:var(--ink);background:var(--bg-0);line-height:1.45;-webkit-font-smoothing:antialiased;letter-spacing:-.01em}
-body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
-  background:radial-gradient(60vw 60vw at 12% -8%,var(--mesh-a),transparent 60%),
-  radial-gradient(52vw 52vw at 96% 4%,var(--mesh-b),transparent 58%),
-  radial-gradient(60vw 50vw at 78% 108%,var(--mesh-c),transparent 60%),
-  linear-gradient(180deg,var(--bg-0),var(--bg-1))}
+html{background:var(--bg)}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","SF Pro Display","Helvetica Neue",Inter,system-ui,sans-serif;
+  font-size:14px;line-height:1.45;letter-spacing:-.011em;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
 img{max-width:100%}
-.mono{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;font-variant-numeric:tabular-nums;letter-spacing:-.02em}
-.wrap{max-width:min(2040px,100%);margin:0 auto;min-height:100dvh;display:flex;flex-direction:column;
-  padding:18px clamp(12px,2.2vw,30px) 44px;
-  padding-left:max(clamp(12px,2.2vw,30px),env(safe-area-inset-left));
-  padding-right:max(clamp(12px,2.2vw,30px),env(safe-area-inset-right));
-  padding-bottom:calc(44px + env(safe-area-inset-bottom))}
-html{background:var(--bg-0)}
-.glass{background:var(--glass);-webkit-backdrop-filter:blur(24px) saturate(180%);backdrop-filter:blur(24px) saturate(180%);
-  border:1px solid var(--stroke);border-radius:20px;box-shadow:var(--shadow)}
-.glass-inset{background:var(--glass-2);border:1px solid var(--stroke-2);border-radius:14px}
-.eyebrow{font-size:11px;font-weight:650;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3)}
+.mono{font-family:ui-monospace,"SF Mono",SFMono-Regular,Menlo,monospace;font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+.muted{color:var(--ink-3)}
+.wrap{max-width:min(1900px,100%);margin:0 auto;min-height:100dvh;display:flex;flex-direction:column;
+  padding:14px clamp(14px,2.2vw,30px) 40px;
+  padding-left:max(clamp(14px,2.2vw,30px),env(safe-area-inset-left));
+  padding-right:max(clamp(14px,2.2vw,30px),env(safe-area-inset-right));
+  padding-bottom:calc(40px + env(safe-area-inset-bottom))}
 
-/* header */
-.top{position:sticky;top:10px;z-index:50;display:flex;align-items:center;gap:16px;flex-wrap:wrap;padding:14px 18px;margin-bottom:16px}
-.brand{display:flex;align-items:center;gap:12px}
-.mark{width:38px;height:38px;border-radius:11px;display:grid;place-items:center;background:conic-gradient(from 210deg,#0a84ff,#5e5ce6,#32d158,#0a84ff);box-shadow:0 6px 16px -6px rgba(10,132,255,.7)}
-.mark svg{width:20px;height:20px}
-.brand h1{font-size:16px;font-weight:650;margin:0}
-.brand .sub{font-size:11.5px;color:var(--ink-3);margin-top:1px}
-.hprice{display:flex;align-items:baseline;gap:9px;margin-left:auto}
-.hprice .px{font-size:26px;font-weight:680;transition:color .2s}
-.flash-up{animation:fu .6s} .flash-dn{animation:fd .6s}
-@keyframes fu{0%{color:var(--up)}100%{color:var(--ink)}}
-@keyframes fd{0%{color:var(--down)}100%{color:var(--ink)}}
-.chip{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:999px;font-size:12.5px;font-weight:600}
-.chip.up{color:var(--up);background:var(--up-soft)}.chip.down{color:var(--down);background:var(--down-soft)}
-.chip.flat{color:var(--flat);background:var(--flat-soft)}.chip.tiny{font-size:11px;padding:2px 8px}
-.chip.ghost{background:var(--glass-2);color:var(--ink-2)}
-.hmeta{display:flex;align-items:center;gap:12px}
-.status{display:flex;flex-direction:column;gap:2px;font-size:11px;color:var(--ink-3);text-align:right}
-.live{display:inline-flex;align-items:center;gap:6px;font-weight:600;color:var(--ink-2)}
-.dot{width:7px;height:7px;border-radius:50%;background:var(--ink-3)}
-.dot.on{background:var(--up);animation:pulse 2s infinite}
-.dot.stale{background:var(--flat)} .dot.off{background:var(--down)}
-@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(50,209,88,.5)}70%{box-shadow:0 0 0 8px rgba(50,209,88,0)}100%{box-shadow:0 0 0 0 rgba(50,209,88,0)}}
-.tbtn{appearance:none;border:1px solid var(--stroke);background:var(--glass-2);color:var(--ink-2);width:36px;height:36px;border-radius:11px;cursor:pointer;font-size:15px;display:grid;place-items:center;transition:.15s}
-.tbtn:hover{background:var(--accent-soft);color:var(--accent)} .tbtn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+/* surfaces ---------------------------------------------------------------- */
+.card{background:var(--card);-webkit-backdrop-filter:saturate(180%) blur(20px);backdrop-filter:saturate(180%) blur(20px);
+  border:.5px solid var(--line);border-radius:var(--r-lg);box-shadow:var(--shadow)}
+.pad{padding:18px 20px}
+.eyebrow{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3)}
+h1,h2,h3{margin:0;font-weight:600;letter-spacing:-.02em}
+.sect-h{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin:0 0 12px}
+.sect-h h3{font-size:15px;color:var(--ink)}
+.sect-h .sp{margin-left:auto}
+.sect-h .note{font-size:12px;color:var(--ink-3);font-weight:400}
+.sub-h{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);margin:20px 0 8px}
+.sub-h:first-child{margin-top:0}
 
-/* signal */
-.signal{padding:20px 24px;margin-bottom:16px;display:grid;grid-template-columns:minmax(210px,280px) 1fr;gap:28px;align-items:center}
-.sig-right{display:flex;flex-direction:column;gap:16px}
-.tfblock{display:flex;flex-direction:column;gap:8px}
-.blab{font-size:10.5px;font-weight:650;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3)}
-.sig-word{font-size:clamp(32px,5vw,50px);font-weight:750;line-height:1;letter-spacing:-.03em}
-.sig-word.buy{color:var(--up)}.sig-word.sell{color:var(--down)}.sig-word.side{color:var(--flat)}
-.sig-bias{font-size:14px;color:var(--ink-2);margin-top:6px}
-.conf{margin-top:10px}.conf .bar{height:8px;border-radius:99px;background:var(--stroke);overflow:hidden}
-.conf .fill{height:100%;border-radius:99px;background:linear-gradient(90deg,var(--flat),var(--up));transition:width .5s}
-.conf .lab{display:flex;justify-content:space-between;font-size:11px;color:var(--ink-3);margin-top:5px}
-.factors{display:flex;flex-wrap:wrap;gap:8px}
-.factor{display:flex;align-items:center;gap:7px;padding:6px 11px;border-radius:999px}
-.factor .k{font-size:11px;color:var(--ink-3);font-weight:600}
-.factor .v{display:flex;align-items:center;gap:5px;font-weight:600;font-size:11.5px}
-.factor .v small{font-weight:500;color:var(--ink-3);font-size:11px}
-.arrow{font-size:12px;width:16px;text-align:center}.arrow.u{color:var(--up)}.arrow.d{color:var(--down)}.arrow.f{color:var(--flat)}
+/* grouped inset list — the iOS Settings idiom, used everywhere a table would be */
+.list{border-radius:var(--r-md);overflow:hidden;background:var(--fill)}
+.item{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 13px;position:relative}
+.item+.item::before{content:"";position:absolute;left:13px;right:0;top:0;height:.5px;background:var(--line-2)}
+.item .k{font-size:13px;color:var(--ink-2);min-width:0}
+.item .v{font-size:13.5px;font-weight:590;text-align:right;white-space:nowrap}
+.item .v.up{color:var(--up)}.item .v.down{color:var(--down)}
+.tag{font-size:11px;font-weight:590;padding:1.5px 7px;border-radius:99px;margin-left:7px;white-space:nowrap}
+.tag.up{color:var(--up);background:var(--up-soft)}.tag.down{color:var(--down);background:var(--down-soft)}
+.tag.flat{color:var(--flat);background:var(--flat-soft)}
 
-.tfstrip{display:flex;gap:8px;flex-wrap:wrap;align-items:stretch}
-.tfstrip .lbl{align-self:center;font-size:11px;font-weight:650;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3);margin-right:2px}
-.tf{flex:1;min-width:80px;padding:8px 10px;border-radius:11px;background:var(--glass-2);border:1px solid var(--stroke-2);text-align:center}
-.tf .t{font-size:10.5px;color:var(--ink-3);font-weight:600}
-.tf .w{font-size:12.5px;font-weight:750;margin-top:3px;letter-spacing:-.01em}
-.tf .r{font-size:10px;color:var(--ink-3);margin-top:2px}
-.tf.buy .w{color:var(--up)}.tf.sell .w{color:var(--down)}.tf.side .w{color:var(--flat)}.tf.na .w{color:var(--ink-3)}
-.exstrip{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
-.expill{font-size:11px;padding:4px 9px;border-radius:99px;background:var(--glass-2);border:1px solid var(--stroke-2)}
-.expill .nm{color:var(--ink-3);margin-right:5px}
-.grid{display:grid;grid-template-columns:minmax(0,1fr) var(--rail);gap:16px;align-items:start;flex:1 1 auto}
-.grid>main{min-width:0}
-:root{--rail:clamp(330px,23vw,430px);--hdr:66px}
-.top,.tabs{background:var(--glass-strong)}
-.tabs{display:flex;gap:4px;padding:5px;margin-bottom:14px;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;position:sticky;top:calc(var(--hdr) + 20px);z-index:40}
-.tabs::-webkit-scrollbar{display:none}
-.tab{border:0;background:transparent;color:var(--ink-3);padding:8px 15px;border-radius:11px;font-size:13.5px;font-weight:580;cursor:pointer;white-space:nowrap;font-family:inherit;transition:.15s}
-.tab:hover{color:var(--ink-2)}.tab[aria-selected="true"]{background:var(--glass-hi);color:var(--ink);box-shadow:0 1px 4px rgba(0,0,0,.08)}
-.tab:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-.panel{padding:18px 20px;margin-bottom:16px;scroll-margin-top:calc(var(--hdr) + 78px)}.panel[hidden]{display:none}
-.panel h3{font-size:12px;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-3);margin:0 0 12px;font-weight:650}
-.panel h3.mt{margin-top:22px}
-
-/* live market */
-.mkthead{display:flex;flex-wrap:wrap;gap:10px;align-items:baseline;margin-bottom:14px}
-.mkthead .big{font-size:30px;font-weight:720}
-.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(116px,1fr));gap:10px}
-.tile{padding:12px 13px;border-radius:13px;min-width:0}
-.tile .v,.tile .x,.tile .k{overflow-wrap:anywhere}.tile .k{font-size:11px;color:var(--ink-3);font-weight:560}
-.tile .v{font-size:18px;font-weight:660;margin-top:3px}.tile .x{font-size:11px;color:var(--ink-3);margin-top:2px}
+/* stat tiles */
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(118px,1fr));gap:9px}
+.tiles>*:last-child,.fsum>*:last-child{grid-column-end:-1}
+.tile{background:var(--fill);border-radius:var(--r-md);padding:11px 12px;min-width:0}
+.tile .k{font-size:11.5px;color:var(--ink-3);font-weight:500}
+.tile .v{font-size:17px;font-weight:600;margin-top:2px;letter-spacing:-.02em;overflow-wrap:break-word}
+.tile .x{font-size:11px;color:var(--ink-3);margin-top:1px;overflow-wrap:anywhere}
 .tile .v.up{color:var(--up)}.tile .v.down{color:var(--down)}
 
-.book{display:grid;grid-template-columns:1fr 1fr;gap:14px}
-.bookcol{width:100%;max-width:430px}
-.book>.bookcol:first-child{margin-left:auto}   /* bids hug the centre line, asks run out from it */
-.imb,.tape,.rows{max-width:1140px}
-.bookcol .bh{display:flex;justify-content:space-between;font-size:11px;color:var(--ink-3);font-weight:600;padding:0 4px 6px}
-.brow{position:relative;display:flex;justify-content:space-between;padding:3px 6px;font-size:12.5px;border-radius:6px;overflow:hidden}
-.brow .depth{position:absolute;top:0;bottom:0;opacity:.16}
-.bids .depth{right:0;background:var(--up)}.asks .depth{left:0;background:var(--down)}
-.brow .p{position:relative;font-weight:600}.bids .p{color:var(--up)}.asks .p{color:var(--down)}
-.brow .s{position:relative;color:var(--ink-2)}
-.imb{margin:8px 0 4px}.imb .bar{height:14px;border-radius:99px;overflow:hidden;display:flex;background:var(--down-soft)}
-.imb .b{background:var(--up)}.imb .lab{display:flex;justify-content:space-between;font-size:11.5px;font-weight:600;margin-top:5px}
-.imb .lab .u{color:var(--up)}.imb .lab .d{color:var(--down)}
+.chip{display:inline-flex;align-items:center;gap:5px;padding:2.5px 9px;border-radius:99px;font-size:12.5px;
+  font-weight:590;white-space:nowrap;flex:none;background:var(--fill);color:var(--ink-2)}
+.chip.up{color:var(--up);background:var(--up-soft)}
+.chip.down{color:var(--down);background:var(--down-soft)}
+.chip.flat{color:var(--flat);background:var(--flat-soft)}
+.chip.tiny{font-size:11px;padding:2px 8px}
 
-.tape{display:flex;flex-direction:column;max-height:clamp(280px,34vh,460px);overflow-y:auto}
-.trow{display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:8px;padding:5px 8px;font-size:12px;border-radius:6px;align-items:center}
-.trow+.trow{border-top:1px solid var(--stroke-2)}
-.trow .p{font-weight:600}.trow.buy .p{color:var(--up)}.trow.sell .p{color:var(--down)}
-.trow .side{font-size:10px;font-weight:700;text-transform:uppercase}
+/* header ------------------------------------------------------------------ */
+.top{position:sticky;top:0;z-index:50;display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+  padding:10px 16px;margin-bottom:12px;background:var(--bar);
+  -webkit-backdrop-filter:saturate(180%) blur(20px);backdrop-filter:saturate(180%) blur(20px);
+  border:.5px solid var(--line);border-radius:16px;box-shadow:var(--shadow)}
+.brand{display:flex;align-items:center;gap:10px;min-width:0}
+.mark{width:30px;height:30px;border-radius:8px;display:grid;place-items:center;flex:none;
+  background:linear-gradient(145deg,#0a84ff,#5e5ce6 55%,#30d158)}
+.mark svg{width:16px;height:16px}
+.brand h1{font-size:15px}
+.brand .sub{font-size:11px;color:var(--ink-3);margin-top:-1px}
+.hprice{display:flex;align-items:baseline;gap:8px;margin-left:auto;min-width:0}
+.hprice .px{font-size:24px;font-weight:600;letter-spacing:-.03em;flex:none}
+.flash-up{animation:fu .55s}.flash-dn{animation:fd .55s}
+@keyframes fu{0%{color:var(--up)}100%{color:var(--ink)}}
+@keyframes fd{0%{color:var(--down)}100%{color:var(--ink)}}
+.hmeta{display:flex;align-items:center;gap:10px}
+.status{display:flex;flex-direction:column;gap:1px;font-size:10.5px;color:var(--ink-3);text-align:right}
+.live{display:inline-flex;align-items:center;gap:5px;font-weight:590;color:var(--ink-2)}
+.dot{width:6px;height:6px;border-radius:50%;background:var(--ink-3);flex:none}
+.dot.on{background:var(--up)}.dot.stale{background:var(--flat)}.dot.off{background:var(--down)}
+.tbtn{appearance:none;border:.5px solid var(--line);background:var(--fill);color:var(--ink-2);width:32px;height:32px;
+  border-radius:9px;cursor:pointer;font-size:14px;display:grid;place-items:center;flex:none;transition:.15s}
+.tbtn:hover{background:var(--accent-soft);color:var(--accent)}
+.tbtn:focus-visible,.tab:focus-visible,.ib:focus-visible,.seg button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* 1 — THE CALL ------------------------------------------------------------ */
+.hero{padding:20px 22px;margin-bottom:12px;display:grid;grid-template-columns:minmax(220px,300px) 1fr;gap:26px;align-items:start}
+.callword{font-size:clamp(34px,4.6vw,52px);font-weight:640;line-height:1;letter-spacing:-.035em}
+.callword.buy{color:var(--up)}.callword.sell{color:var(--down)}.callword.side{color:var(--flat)}
+.callbias{font-size:13.5px;color:var(--ink-2);margin-top:7px}
+.conf{margin-top:12px}
+.conf .bar{height:5px;border-radius:99px;background:var(--fill-2);overflow:hidden}
+.conf .fill{height:100%;border-radius:99px;background:var(--accent);transition:width .5s ease}
+.conf .lab{display:flex;justify-content:space-between;font-size:11.5px;color:var(--ink-3);margin-top:6px}
+.tfstrip{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:7px}
+.tfstrip .lbl{display:none}
+.tf{background:var(--fill);border-radius:var(--r-md);padding:9px 6px;text-align:center;min-width:0}
+.tf .t{font-size:10.5px;color:var(--ink-3);font-weight:590}
+.tf .w{font-size:12.5px;font-weight:640;margin-top:2px;letter-spacing:-.02em}
+.tf .r{font-size:10.5px;color:var(--ink-3);margin-top:1px}
+.tf.buy .w{color:var(--up)}.tf.sell .w{color:var(--down)}.tf.side .w{color:var(--flat)}.tf.na .w{color:var(--ink-3)}
+.factors{display:flex;flex-direction:column;border-radius:var(--r-md);overflow:hidden;background:var(--fill)}
+.factor{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 13px;position:relative}
+.factor+.factor::before{content:"";position:absolute;left:13px;right:0;top:0;height:.5px;background:var(--line-2)}
+.factor .k{font-size:12.5px;color:var(--ink-2);flex:0 0 auto}
+.factor .v{display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:590;flex:1 1 0;min-width:0;justify-content:flex-end;text-align:right}
+.factor .v small{font-weight:400;color:var(--ink-3);font-size:12px;white-space:normal}
+.arrow{font-size:11px;width:14px;min-width:14px;flex:none;text-align:center}
+.arrow.u{color:var(--up)}.arrow.d{color:var(--down)}.arrow.f{color:var(--flat)}
+
+/* disclosure --------------------------------------------------------------- */
+.fold{border-radius:var(--r-lg)}
+.fold>summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:9px;
+  font-size:15px;font-weight:600;letter-spacing:-.02em;padding:2px 0;color:var(--ink)}
+.fold>summary::-webkit-details-marker{display:none}
+.fold>summary::after{content:"";margin-left:auto;width:7px;height:7px;flex:none;
+  border-right:1.6px solid var(--ink-3);border-bottom:1.6px solid var(--ink-3);
+  transform:rotate(45deg) translate(-2px,-2px);transition:transform .2s}
+.fold[open]>summary::after{transform:rotate(-135deg) translate(-2px,-2px)}
+.fold>summary .why{font-size:12.5px;font-weight:400;color:var(--ink-3);margin-left:2px}
+.foldbody{padding-top:14px}
+.mini{border-radius:var(--r-md);background:var(--fill);padding:2px 0;margin-top:10px}
+.mini>summary{list-style:none;cursor:pointer;padding:8px 13px;font-size:12.5px;font-weight:590;color:var(--accent)}
+.mini>summary::-webkit-details-marker{display:none}
+.mini[open]>summary{color:var(--ink-3)}
+
+/* tabs --------------------------------------------------------------------- */
+.tabwrap{position:sticky;top:var(--hdr);z-index:40;padding:10px 0 0;margin-bottom:12px;background:var(--bg)}
+.tabs{display:flex;gap:2px;padding:3px;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;
+  background:var(--bar);-webkit-backdrop-filter:saturate(180%) blur(20px);backdrop-filter:saturate(180%) blur(20px);
+  border:.5px solid var(--line);border-radius:12px;box-shadow:var(--shadow)}
+.tabs::-webkit-scrollbar{display:none}
+.tabwrap::after{content:"";position:absolute;top:3px;bottom:3px;right:3px;width:30px;pointer-events:none;
+  border-radius:0 10px 10px 0;background:linear-gradient(90deg,transparent,var(--bar) 78%);opacity:0;transition:opacity .2s}
+.tabwrap.more::after{opacity:1}
+.tab{border:0;background:transparent;color:var(--ink-3);padding:6px 13px;border-radius:9px;font-size:13px;
+  font-weight:560;cursor:pointer;white-space:nowrap;font-family:inherit;letter-spacing:-.01em;transition:.15s}
+.tab:hover{color:var(--ink-2)}
+.tab[aria-selected="true"]{background:var(--card-solid);color:var(--ink);box-shadow:0 0 0 .5px var(--line),0 1px 3px rgba(0,0,0,.06)}
+
+/* layout ------------------------------------------------------------------- */
+.grid{display:grid;grid-template-columns:minmax(0,1fr) var(--rail);gap:12px;align-items:start;flex:1 1 auto}
+.grid>main{min-width:0;display:flex;flex-direction:column;gap:12px}
+.panel{padding:18px 20px;scroll-margin-top:calc(var(--hdr) + 72px)}
+.panel[hidden]{display:none}
+.rail{display:flex;flex-direction:column;gap:12px;position:sticky;top:calc(var(--hdr) + 12px);
+  max-height:calc(100dvh - var(--hdr) - 34px);overflow-y:auto;scrollbar-width:thin}
+
+/* "i" explainers ----------------------------------------------------------- */
+.ib{appearance:none;border:.5px solid var(--line);background:var(--fill);color:var(--ink-3);
+  width:15px;height:15px;min-width:15px;border-radius:50%;font-size:9.5px;font-weight:600;line-height:1;
+  cursor:pointer;padding:0;display:inline-grid;place-items:center;vertical-align:middle;margin-left:5px;
+  font-family:inherit;text-transform:none;letter-spacing:0;transition:.15s}
+.ib:hover,.ib[aria-expanded="true"]{background:var(--accent);border-color:var(--accent);color:#fff}
+.ipop{position:fixed;z-index:200;max-width:min(330px,calc(100vw - 24px));padding:13px 15px;border-radius:14px;
+  background:var(--card-solid);border:.5px solid var(--line);
+  box-shadow:0 0 0 .5px rgba(0,0,0,.05),0 18px 44px -14px rgba(0,0,0,.35);
+  font-size:12.5px;line-height:1.5;color:var(--ink-2)}
+.ipop h4{margin:0 0 5px;font-size:13px;font-weight:600;color:var(--ink)}
+.ipop b{color:var(--ink);font-weight:590}
+.ipop .rd{display:block;margin-top:8px;padding-top:8px;border-top:.5px solid var(--line-2);color:var(--ink-3);font-size:11.5px}
+
+/* segmented control -------------------------------------------------------- */
+.seg{display:inline-flex;gap:2px;padding:2px;border-radius:8px;background:var(--fill-2)}
+.seg button{appearance:none;border:0;background:transparent;color:var(--ink-2);font:inherit;font-size:11.5px;
+  font-weight:590;padding:3px 11px;border-radius:6px;cursor:pointer;transition:.15s}
+.seg button[aria-pressed="true"]{background:var(--card-solid);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.10)}
+
+/* market ------------------------------------------------------------------- */
+.mkthead{display:flex;flex-wrap:wrap;gap:8px;align-items:baseline;margin-bottom:12px}
+.mkthead .big{font-size:26px;font-weight:600;letter-spacing:-.03em}
+.exstrip{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+.expill{font-size:11px;padding:3px 9px;border-radius:99px;background:var(--fill);color:var(--ink-2)}
+.expill .nm{color:var(--ink-3);margin-right:5px}
+.book{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.bookcol{width:100%;max-width:420px}  /* ladder legibility, deliberate */
+.book>.bookcol:first-child{margin-left:auto}
+.bookcol .bh{display:flex;justify-content:space-between;font-size:11px;color:var(--ink-3);font-weight:590;padding:0 6px 5px}
+.brow{position:relative;display:flex;justify-content:space-between;padding:3px 7px;font-size:12.5px;border-radius:5px;overflow:hidden}
+.brow .depth{position:absolute;top:0;bottom:0;opacity:.13}
+.bids .depth{right:0;background:var(--up)}.asks .depth{left:0;background:var(--down)}
+.brow .p{position:relative;font-weight:590}.bids .p{color:var(--up)}.asks .p{color:var(--down)}
+.brow .s{position:relative;color:var(--ink-2)}
+.imb{margin:10px 0 2px}
+.imb .bar{height:5px;border-radius:99px;overflow:hidden;display:flex;background:var(--down-soft)}
+.imb .b{background:var(--up)}
+.imb .lab{display:flex;justify-content:space-between;font-size:11.5px;font-weight:590;margin-top:6px}
+.imb .lab .u{color:var(--up)}.imb .lab .d{color:var(--down)}
+.tape{display:flex;flex-direction:column;max-height:clamp(230px,30vh,380px);overflow-y:auto;
+  border-radius:var(--r-md);background:var(--fill)}
+.trow{display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:8px;padding:5px 11px;font-size:12px;align-items:center;position:relative}
+.trow+.trow::before{content:"";position:absolute;left:11px;right:0;top:0;height:.5px;background:var(--line-2)}
+.trow .p{font-weight:590}.trow.buy .p{color:var(--up)}.trow.sell .p{color:var(--down)}
+.trow .side{font-size:10px;font-weight:640;text-transform:uppercase}
 .trow.buy .side{color:var(--up)}.trow.sell .side{color:var(--down)}
 .trow .t{color:var(--ink-3);text-align:right}
 .trow.big{background:var(--flat-soft);box-shadow:inset 2px 0 0 var(--flat)}
-.tag{font-size:10px;font-weight:700;padding:1px 6px;border-radius:99px}
-.tag.flat{color:var(--flat);background:var(--flat-soft)}
 
-.rows{display:flex;flex-direction:column;gap:1px;border-radius:13px;overflow:hidden}
-.row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:11px 14px;background:var(--glass-2)}
-.row .k{font-size:13px;color:var(--ink-2)}.row .v{font-weight:620;font-size:13.5px}
-.row .v .tag2{font-size:11px;font-weight:600;padding:1px 7px;border-radius:99px;margin-left:6px}
-.tag2.up{color:var(--up);background:var(--up-soft)}.tag2.down{color:var(--down);background:var(--down-soft)}.tag2.flat{color:var(--flat);background:var(--flat-soft)}
-
-.chart{width:100%;height:auto;display:block;max-height:min(48vh,430px)}
+/* charts ------------------------------------------------------------------- */
+.chart{width:100%;height:auto;display:block;max-height:min(46vh,400px)}
+#amdChart{max-height:none}
 .chart-foot{display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap;margin-top:10px;font-size:11px;color:var(--ink-3)}
 .legend{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center}
-.legend .lg{display:inline-flex;align-items:center;gap:6px;white-space:nowrap;font-size:11px;color:var(--ink-2);font-weight:560}
+.legend .lg{display:inline-flex;align-items:center;gap:6px;white-space:nowrap;font-size:11px;color:var(--ink-2);font-weight:500}
 .swatch{width:12px;height:3px;border-radius:2px;display:inline-block;flex:none}
-/* the AMD chart sizes its own viewBox to the panel, so it must not be letterboxed */
-#amdChart{max-height:none;height:auto}
 
-/* projection */
-.projbar{position:relative;height:64px;margin:24px 0 8px}
-.projtrack{position:absolute;top:26px;left:0;right:0;height:14px;border-radius:99px;background:linear-gradient(90deg,var(--down-soft),var(--flat-soft),var(--up-soft))}
-.projfill{position:absolute;top:26px;height:14px;border-radius:99px;background:linear-gradient(90deg,rgba(26,168,81,.35),rgba(26,168,81,.6));border:1px solid var(--up)}
-.projmark{position:absolute;top:14px;width:2px;height:38px;background:var(--ink)}
-.projmark::after{content:attr(data-l);position:absolute;top:-19px;left:50%;transform:translateX(-50%);font-size:11px;font-weight:700;white-space:nowrap}
-.projends{display:flex;justify-content:space-between;font-size:12px;color:var(--ink-3);font-weight:600}
-.scen{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:16px}
-.scen .c{padding:13px;border-radius:14px;text-align:center}.scen .c .t{font-size:11px;font-weight:650;text-transform:uppercase}
-.scen .c .p{font-size:20px;font-weight:700;margin:5px 0 2px}.scen .c .d{font-size:11px;color:var(--ink-3)}
+/* projection --------------------------------------------------------------- */
+.projbar{position:relative;height:56px;margin:20px 0 6px}
+.projtrack{position:absolute;top:24px;left:0;right:0;height:6px;border-radius:99px;background:var(--fill-2)}
+.projfill{position:absolute;top:24px;height:6px;border-radius:99px;background:var(--accent);opacity:.5}
+.projmark{position:absolute;top:14px;width:2px;height:26px;background:var(--ink);border-radius:2px}
+.projmark::after{content:attr(data-l);position:absolute;top:-18px;left:50%;transform:translateX(-50%);font-size:11.5px;font-weight:590;white-space:nowrap}
+.projends{display:flex;justify-content:space-between;font-size:12px;color:var(--ink-3)}
+.scen{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;margin-top:14px}
+.scen .c{background:var(--fill);border-radius:var(--r-md);padding:12px;text-align:center}
+.scen .c .t{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+.scen .c .p{font-size:19px;font-weight:600;margin:4px 0 1px;letter-spacing:-.02em}
+.scen .c .d{font-size:11px;color:var(--ink-3)}
 .scen .bull .t,.scen .bull .p{color:var(--up)}.scen .base .t{color:var(--flat)}.scen .bear .t,.scen .bear .p{color:var(--down)}
 
-/* rail */
-.rail{display:flex;flex-direction:column;gap:16px;position:sticky;top:calc(var(--hdr) + 24px);max-height:calc(100dvh - var(--hdr) - 40px);overflow-y:auto;scrollbar-width:thin}
-.senti{padding:16px 18px}.senti .top-r{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px}
-.senti .val{font-size:20px;font-weight:720}.senti .val.up{color:var(--up)}.senti .val.down{color:var(--down)}.senti .val.flat{color:var(--flat)}
-.senti .meter{height:9px;border-radius:99px;background:var(--down-soft);overflow:hidden;display:flex}
-.senti .meter .m-up{background:var(--up)}.senti .meter .m-fl{background:var(--flat)}
-.thesis{font-size:12.5px;color:var(--ink-2);line-height:1.5;margin-top:11px;padding:11px 12px;border-radius:12px;background:var(--glass-2)}
-.thesis .badge{font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--accent);display:block;margin-bottom:5px}
-.keys{display:flex;gap:14px;margin-top:10px;font-size:11px;color:var(--ink-3)}.keys span{display:inline-flex;align-items:center;gap:5px}
-.kd{width:8px;height:8px;border-radius:2px}.kd.u{background:var(--up)}.kd.d{background:var(--down)}.kd.f{background:var(--flat)}
-.feed{padding:6px 6px 8px}.fhead{display:flex;justify-content:space-between;align-items:center;padding:10px 12px 8px}.fhead h3{margin:0;font-size:12px;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-3);font-weight:650}
-.newsitem{display:block;padding:11px 12px;border-radius:13px;text-decoration:none;color:inherit;transition:.15s}
-.newsitem+.newsitem{border-top:1px solid var(--stroke-2)}.newsitem:hover{background:var(--glass-hi)}
-.newsitem .meta{display:flex;align-items:center;gap:8px;margin-bottom:4px}
-.newsitem .src{font-size:11px;color:var(--ink-3);font-weight:600}.newsitem .time{font-size:11px;color:var(--ink-3);margin-left:auto}
-.badge2{font-size:10px;font-weight:700;text-transform:uppercase;padding:2px 7px;border-radius:99px}
-.badge2.up{color:var(--up);background:var(--up-soft)}.badge2.down{color:var(--down);background:var(--down-soft)}.badge2.flat{color:var(--flat);background:var(--flat-soft)}
-.newsitem .hl{font-size:13px;font-weight:540;line-height:1.35}.newsitem .rz{font-size:11px;color:var(--ink-3);margin-top:3px;font-style:italic}
-.agentbar{display:flex;align-items:center;gap:9px;padding:11px 14px;font-size:11.5px;color:var(--ink-3)}
+/* news --------------------------------------------------------------------- */
+.senti-row{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.senti-row .val{font-size:15px;font-weight:600;margin-left:auto}
+.senti-row .val.up{color:var(--up)}.senti-row .val.down{color:var(--down)}.senti-row .val.flat{color:var(--flat)}
+.meter{height:4px;border-radius:99px;background:var(--down-soft);overflow:hidden;display:flex;flex:1 1 auto;max-width:150px}
+.meter .m-up{background:var(--up)}.meter .m-fl{background:var(--flat)}
+.keys{display:flex;gap:12px;font-size:11px;color:var(--ink-3)}
+.keys span{display:inline-flex;align-items:center;gap:4px}
+.kd{width:7px;height:7px;border-radius:2px}.kd.u{background:var(--up)}.kd.d{background:var(--down)}.kd.f{background:var(--flat)}
+.thesis{font-size:12.5px;color:var(--ink-2);line-height:1.5;padding:11px 13px;border-radius:var(--r-md);background:var(--fill)}
+.thesis .badge{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--accent);display:block;margin-bottom:4px}
+.newsitem{display:block;padding:11px 2px;text-decoration:none;color:inherit;position:relative}
+.newsitem+.newsitem::before{content:"";position:absolute;left:0;right:0;top:0;height:.5px;background:var(--line-2)}
+.newsitem:hover .hl{color:var(--accent)}
+.newsitem .meta{display:flex;align-items:center;gap:8px;margin-bottom:3px}
+.newsitem .src{font-size:11px;color:var(--ink-3);font-weight:590;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:45%}
+.newsitem .time{font-size:11px;color:var(--ink-3);margin-left:auto;white-space:nowrap}
+.badge2{font-size:9.5px;font-weight:640;text-transform:uppercase;padding:1.5px 6px;border-radius:99px;flex:none}
+.badge2.up{color:var(--up);background:var(--up-soft)}.badge2.down{color:var(--down);background:var(--down-soft)}
+.badge2.flat{color:var(--ink-3);background:var(--fill)}
+.newsitem .hl{font-size:13px;font-weight:500;line-height:1.38;transition:color .15s}
+.newsitem .rz{font-size:11.5px;color:var(--ink-3);margin-top:3px;font-style:italic}
+.agentbar{display:flex;align-items:center;gap:8px;padding:10px 2px 2px;font-size:11px;color:var(--ink-3)}
 
-.verdict{padding:14px 16px;border-radius:14px;font-weight:650;font-size:15px}
-.verdict.pass{background:var(--up-soft);color:var(--up)}
-.verdict.fail{background:var(--flat-soft);color:var(--ink)}
-.verdict small{display:block;font-weight:500;color:var(--ink-3);margin-top:5px;font-size:12px;line-height:1.5}
-.profile{display:flex;align-items:flex-end;gap:5px;height:130px;padding:6px 0 22px}
-.profile .b{flex:1;background:linear-gradient(180deg,var(--accent),var(--accent-soft));border-radius:5px 5px 0 0;position:relative;min-height:2px}
-.profile .b b{position:absolute;bottom:-18px;left:0;right:0;text-align:center;font-size:9px;color:var(--ink-3);font-weight:500}
-.profile .b.hot{background:linear-gradient(180deg,var(--up),var(--up-soft))}
-.notecard{font-size:12.5px;color:var(--ink-2);line-height:1.55;padding:10px 12px;border-radius:12px;background:var(--glass-2);margin-bottom:8px}
-.foot{margin-top:22px;padding:16px 20px;font-size:11.5px;color:var(--ink-3);line-height:1.6}
-.foot .discl{padding:10px 12px;border-radius:12px;background:var(--flat-soft);color:var(--ink-2);margin-bottom:10px}
-.muted{color:var(--ink-3)}
-/* "i" explainers */
-.ib{appearance:none;border:1px solid var(--stroke);background:var(--glass-2);color:var(--ink-3);
-  width:16px;height:16px;min-width:16px;border-radius:50%;font-size:10px;font-weight:700;line-height:1;
-  cursor:pointer;padding:0;display:inline-grid;place-items:center;vertical-align:middle;margin-left:6px;
-  font-family:inherit;text-transform:none;letter-spacing:0;transition:.15s}
-.ib:hover,.ib[aria-expanded="true"]{background:var(--accent);border-color:var(--accent);color:#fff}
-.ib:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-.ipop{position:fixed;z-index:200;max-width:min(340px,calc(100vw - 24px));padding:13px 15px;border-radius:15px;
-  background:var(--glass);-webkit-backdrop-filter:blur(30px) saturate(180%);backdrop-filter:blur(30px) saturate(180%);
-  border:1px solid var(--stroke);box-shadow:0 22px 48px -18px rgba(18,24,40,.42),0 2px 8px rgba(18,24,40,.10);
-  font-size:12.5px;line-height:1.55;color:var(--ink-2);letter-spacing:-.005em}
-.ipop h4{margin:0 0 5px;font-size:12.5px;font-weight:700;color:var(--ink);letter-spacing:-.01em}
-.ipop b{color:var(--ink)}
-.ipop .rd{display:block;margin-top:7px;padding-top:7px;border-top:1px solid var(--stroke-2);color:var(--ink-3);font-size:11.5px}
-
-/* segmented control (order book units) */
-.seg{display:inline-flex;gap:2px;padding:2px;border-radius:9px;background:var(--glass-2);border:1px solid var(--stroke-2)}
-.seg button{appearance:none;border:0;background:transparent;color:var(--ink-3);font:inherit;font-size:11px;font-weight:650;
-  padding:3px 10px;border-radius:7px;cursor:pointer;letter-spacing:0;text-transform:none;transition:.15s}
-.seg button[aria-pressed="true"]{background:var(--glass-hi);color:var(--ink);box-shadow:0 1px 3px rgba(0,0,0,.10)}
-.seg button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
-.h3row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 12px}
-.h3row.mt{margin-top:22px}
-.h3row h3{margin:0}
-.h3row .sp{margin-left:auto}
-
-/* insiders & congress */
-.fsum{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-bottom:14px}
-.fl{display:flex;flex-direction:column;gap:1px;border-radius:13px;overflow:hidden}
+/* filings ------------------------------------------------------------------ */
+.fsum{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px;margin-bottom:14px}
+.fl{display:flex;flex-direction:column;border-radius:var(--r-md);overflow:hidden;background:var(--fill)}
 .fr{display:grid;grid-template-columns:minmax(0,1.5fr) auto minmax(0,1fr) auto;gap:10px;align-items:center;
-  padding:10px 13px;background:var(--glass-2);text-decoration:none;color:inherit;transition:.15s}
-.fr:hover{background:var(--glass-hi)}
-.fr .who{font-weight:620;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.fr .role{font-size:11px;color:var(--ink-3);font-weight:500}
-.fr .amt{font-size:12.5px;font-weight:600;text-align:right}
+  padding:10px 13px;text-decoration:none;color:inherit;position:relative}
+.fr+.fr::before{content:"";position:absolute;left:13px;right:0;top:0;height:.5px;background:var(--line-2)}
+.fr .who{font-weight:590;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fr .role{font-size:11px;color:var(--ink-3);font-weight:400}
+.fr .amt{font-size:12.5px;font-weight:590;text-align:right}
 .fr .when{font-size:11px;color:var(--ink-3);text-align:right;white-space:nowrap}
-.pill{font-size:10px;font-weight:700;text-transform:uppercase;padding:2px 8px;border-radius:99px;letter-spacing:.02em}
+.pill{font-size:10px;font-weight:640;text-transform:uppercase;padding:2px 8px;border-radius:99px}
 .pill.buy{color:var(--up);background:var(--up-soft)}.pill.sell{color:var(--down);background:var(--down-soft)}
-.pill.other{color:var(--ink-3);background:var(--glass-2);border:1px solid var(--stroke-2)}
-.emptybox{padding:14px;border-radius:13px;background:var(--glass-2);font-size:12.5px;color:var(--ink-3);line-height:1.55}
+.pill.other{color:var(--ink-3);background:var(--fill-2)}
+.emptybox{padding:13px;border-radius:var(--r-md);background:var(--fill);font-size:12.5px;color:var(--ink-3);line-height:1.5}
 
-@media (max-width:980px){
-  .grid{grid-template-columns:1fr}.signal{grid-template-columns:1fr}
+/* backtest / amd ----------------------------------------------------------- */
+.verdict{padding:13px 15px;border-radius:var(--r-md);font-weight:590;font-size:14.5px}
+.verdict.pass{background:var(--up-soft);color:var(--up)}
+.verdict.fail{background:var(--fill);color:var(--ink)}
+.verdict small{display:block;font-weight:400;color:var(--ink-3);margin-top:4px;font-size:12.5px;line-height:1.45}
+.profile{display:flex;align-items:flex-end;gap:4px;height:120px;padding:6px 0 20px}
+.profile .b{flex:1;background:var(--accent);opacity:.55;border-radius:3px 3px 0 0;position:relative;min-height:2px}
+.profile .b b{position:absolute;bottom:-17px;left:0;right:0;text-align:center;font-size:9px;color:var(--ink-3);font-weight:400}
+.profile .b.hot{background:var(--up);opacity:.85}
+.notecard{font-size:12.5px;color:var(--ink-2);line-height:1.5;padding:10px 12px;border-radius:var(--r-md);background:var(--fill);margin-bottom:8px}
+.note{font-size:12.5px;color:var(--ink-2);line-height:1.55}
+.foot{margin-top:16px;padding:14px 18px;font-size:11.5px;color:var(--ink-3);line-height:1.55}
+.foot .discl{padding:10px 12px;border-radius:var(--r-md);background:var(--fill);color:var(--ink-2);margin-bottom:9px}
+
+/* ---------------- responsive ---------------- */
+@media (max-width:1080px){
+  .grid{grid-template-columns:1fr}
+  .hero{grid-template-columns:1fr;gap:18px}
   .rail{position:static;max-height:none;overflow:visible}
-  .top{position:sticky;top:0;border-radius:0 0 20px 20px;margin:-18px calc(-1 * clamp(12px,2.2vw,30px)) 16px;
-    padding-top:calc(12px + env(safe-area-inset-top))}
   .book{grid-template-columns:1fr}
-  .tabs{position:sticky;top:calc(var(--hdr) - 2px);border-radius:14px}
-  .panel{scroll-margin-top:calc(var(--hdr) + 62px)}
-}
-@media (max-width:600px){
-  .wrap{padding:10px 10px 34px;padding-left:max(10px,env(safe-area-inset-left));
-    padding-right:max(10px,env(safe-area-inset-right));padding-bottom:calc(34px + env(safe-area-inset-bottom))}
-  .top{margin:-10px -10px 12px;border-radius:0 0 18px 18px;gap:7px 10px;padding:8px 12px;
-    padding-top:calc(8px + env(safe-area-inset-top))}
-  .brand{gap:9px}
-  .brand .sub{display:none}
-  .mark{width:30px;height:30px;border-radius:9px}
-  .mark svg{width:16px;height:16px}
-  .brand h1{font-size:14.5px}
-  .hprice{order:0;width:auto;margin-left:auto;gap:6px;flex-wrap:nowrap;max-width:62%;
-    overflow-x:auto;scrollbar-width:none}
+  .bookcol{max-width:none;margin-left:0!important}
+  /* single column: reorder by importance, news right after the live market */
+  /* align-items:start is right for the desktop GRID, but in a column FLEX the
+     cross axis is horizontal — leaving it there shrink-wraps every section to
+     its content instead of filling the column. */
+  .grid{display:flex;flex-direction:column;gap:12px;align-items:stretch}
+  .grid>main,.rail{display:contents}
+  /* promoted flex items default to min-width:auto, which let the scrolling tab
+     strip push the page wider than the viewport — pin them to the column */
+  .tabwrap,.panel,.hero,#p-research,#s-news{min-width:0;max-width:100%}
+  .tabs{min-width:0}
+  .tabwrap{order:1}#p-amd{order:2}#p-live{order:3}
+  #s-news{order:4}#p-proj{order:5}#p-over{order:6}#p-research{order:7}
+  .top{top:0;border-radius:0 0 16px 16px;margin:-14px calc(-1 * clamp(14px,2.2vw,30px)) 12px;
+    padding-top:calc(10px + env(safe-area-inset-top))}
+  .tabwrap{top:var(--hdr);padding-top:8px}
+  .panel{scroll-margin-top:calc(var(--hdr) + 56px)}
+  .brand{order:0}
+  .hmeta{order:1;width:auto;margin-left:auto}
+  .hprice{order:2;width:100%;max-width:100%;margin-left:0;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;
+    -webkit-mask-image:linear-gradient(90deg,#000 92%,transparent);mask-image:linear-gradient(90deg,#000 92%,transparent)}
   .hprice::-webkit-scrollbar{display:none}
-  .hprice .px{font-size:19px}
-  .hmeta{order:1;width:100%;margin-left:0;gap:10px;justify-content:space-between}
-  .status{flex-direction:row;align-items:center;gap:9px;text-align:left;font-size:10px}
-  .tbtn{width:30px;height:30px;border-radius:9px;font-size:13px}
-  .tiles{grid-template-columns:repeat(auto-fit,minmax(104px,1fr));gap:8px}
-  .tile .v{font-size:15px}
-  .tile .k,.tile .x{font-size:10.5px}
-  .fsum{grid-template-columns:repeat(2,1fr)}
+}
+@media (max-width:620px){
+  .wrap{padding:10px 12px 30px;padding-left:max(12px,env(safe-area-inset-left));
+    padding-right:max(12px,env(safe-area-inset-right));padding-bottom:calc(30px + env(safe-area-inset-bottom))}
+  .top{margin:-10px -12px 10px;padding:8px 13px;gap:5px 10px;padding-top:calc(8px + env(safe-area-inset-top))}
+  .brand .sub{display:none}
+  .brand h1{font-size:14.5px}
+  .mark{width:28px;height:28px;border-radius:7px}
+  .hprice .px{font-size:21px}
+  .chip{font-size:11.5px;padding:2px 8px}.chip.tiny{font-size:10.5px;padding:1.5px 7px}
+  .status{font-size:9.5px}
+  .tbtn{width:30px;height:30px}
+  .pad,.panel{padding:15px 15px}
+  .hero{padding:16px 15px}
+  .callword{font-size:38px}
+  .tf{padding:7px 3px;border-radius:9px}
+  .tf .t{font-size:9.5px}.tf .w{font-size:10.5px}.tf .r{font-size:9px}
+  /* fixed two-up so nothing is left as a half-width orphan; an odd last tile
+     spans the row instead of floating beside dead space */
+  .tiles{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
+  .tile{padding:10px 11px}.tile .v{font-size:15px}
+  .fsum{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
+  /* everything else runs the full width of the card */
+  .imb,.tape,.projbar,.projends,.scen,.list,.factors,.fl{max-width:none}
+  .exstrip{gap:5px}
+  .expill{flex:1 1 auto;text-align:center}
   .fr{grid-template-columns:minmax(0,1fr) auto;row-gap:3px}
   .fr .amt{grid-column:1;text-align:left}.fr .when{grid-column:2}
-  .scen{grid-template-columns:1fr}
+  .scen{grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+  .scen .c{padding:10px 6px}
+  .scen .c .p{font-size:15px}
+  .scen .c .t{font-size:10px}
+  .scen .c .d{font-size:10px}
+  .mkthead .big{font-size:22px}
+  .sect-h h3,.fold>summary{font-size:14px}
   .ipop{max-width:calc(100vw - 20px)}
-  .signal{padding:16px}
-  .sig-word{font-size:40px}
-  .tf{min-width:0;flex:1 1 30%}
-  .factor{flex:1 1 45%}
-  .mkthead .big{font-size:24px}
-  .panel{padding:14px 14px}
-  .tab{padding:7px 12px;font-size:13px}
-  .brow,.trow{font-size:11.5px}
-  .newsitem .hl{font-size:13px}
-  .grid{gap:12px}
+  .tab{padding:6px 11px;font-size:12.5px}
 }
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style>
 </head>
 <body>
 <div class="wrap">
-  <header class="top glass">
+
+  <!-- ══ header: price first, always ══ -->
+  <header class="top">
     <div class="brand">
       <div class="mark"><svg viewBox="0 0 24 24" fill="none"><path d="M12 2L3 12l9 10 9-10L12 2z" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/><path d="M12 6l-5 6 5 6 5-6-5-6z" fill="#fff" fill-opacity=".92"/></svg></div>
-      <div><h1>PLTR Signal Desk</h1><div class="sub">Palantir · NASDAQ: PLTR &nbsp;·&nbsp; tokenized <span id="pxSym">PLTRX</span></div></div>
+      <div><h1>PLTR</h1><div class="sub">Palantir · NASDAQ &nbsp;·&nbsp; tokenized <span id="pxSym">PLTRX</span></div></div>
     </div>
     <div class="hprice">
       <span class="px mono" id="hPrice">—</span>
       <span class="chip flat" id="hChange">—</span>
-      <span class="chip ghost tiny" id="hPhase" hidden></span>
+      <span class="chip tiny" id="hPhase" hidden></span>
       <span class="chip tiny mono" id="hExt" hidden></span>
-      <span class="chip ghost tiny mono" id="hTok">PLTRX —</span>
+      <span class="chip tiny mono" id="hTok">PLTRX —</span>
     </div>
     <div class="hmeta">
       <div class="status">
         <span class="live"><span class="dot" id="liveDot"></span><span id="connLabel">connecting…</span></span>
         <span id="updated">—</span>
       </div>
-      <button class="tbtn" id="themeBtn" title="Toggle theme" aria-label="Toggle theme">◐</button>
+      <button class="tbtn" id="themeBtn" title="Toggle appearance" aria-label="Toggle appearance">◐</button>
     </div>
   </header>
 
-  <section class="signal glass">
-    <div class="sig-left">
+  <!-- ══ 1 · THE CALL — the one thing worth reading first ══ -->
+  <section class="hero card">
+    <div>
       <span class="eyebrow">Composite signal<button class="ib" type="button" data-i="composite" aria-label="What is this?" aria-expanded="false">i</button></span>
-      <div class="sig-word side" id="sigWord">—</div>
-      <div class="sig-bias" id="sigBias">Waiting for first data…</div>
+      <div class="callword side" id="sigWord">—</div>
+      <div class="callbias" id="sigBias">Waiting for first data…</div>
       <div class="conf"><div class="bar"><div class="fill" id="confFill" style="width:0%"></div></div>
         <div class="lab"><span>Conviction<button class="ib" type="button" data-i="conviction" aria-label="What is this?" aria-expanded="false">i</button></span><span id="confVal">—</span></div></div>
     </div>
-    <div class="sig-right">
-      <div class="tfblock">
-        <span class="blab">Short-term signals<button class="ib" type="button" data-i="timeframes" aria-label="What is this?" aria-expanded="false">i</button></span>
-        <div class="tfstrip" id="tfStrip" aria-label="Short-term timeframe signals"></div>
-      </div>
-      <div class="tfblock">
-        <span class="blab">Indicators driving the call<button class="ib" type="button" data-i="factors" aria-label="What is this?" aria-expanded="false">i</button></span>
+    <div>
+      <div class="tfstrip" id="tfStrip" aria-label="Short-term timeframe signals"></div>
+      <details class="mini" id="whyFold">
+        <summary>What's driving it<button class="ib" type="button" data-i="factors" aria-label="What is this?" aria-expanded="false">i</button></summary>
         <div class="factors" id="factors"></div>
-      </div>
+      </details>
     </div>
   </section>
 
   <div class="grid">
     <main>
-      <div class="tabs glass" role="tablist">
-        <button class="tab" role="tab" aria-selected="true" aria-controls="p-live" id="t-live">Live market</button>
-        <button class="tab" role="tab" aria-selected="false" aria-controls="p-over" id="t-over">Overview</button>
-        <button class="tab" role="tab" aria-selected="false" aria-controls="p-fund" id="t-fund">Fundamentals</button>
-        <button class="tab" role="tab" aria-selected="false" aria-controls="p-proj" id="t-proj">Projection</button>
-        <button class="tab" role="tab" aria-selected="false" aria-controls="p-edge" id="t-edge">Open-window edge</button>
-        <button class="tab" role="tab" aria-selected="false" aria-controls="p-amd" id="t-amd">AMD · Power of 3</button>
-        <button class="tab" role="tab" aria-selected="false" aria-controls="p-filings" id="t-fil">Insiders &amp; Congress</button>
-      </div>
+      <div class="tabwrap"><div class="tabs" role="tablist">
+        <button class="tab" role="tab" aria-selected="true"  aria-controls="p-amd"      id="t-amd">Session</button>
+        <button class="tab" role="tab" aria-selected="false" aria-controls="p-live"     id="t-live">Market</button>
+        <button class="tab" role="tab" aria-selected="false" aria-controls="s-news"     id="t-news">News</button>
+        <button class="tab" role="tab" aria-selected="false" aria-controls="p-proj"     id="t-proj">Projection</button>
+        <button class="tab" role="tab" aria-selected="false" aria-controls="p-over"     id="t-over">Chart</button>
+        <button class="tab" role="tab" aria-selected="false" aria-controls="p-research" id="t-res">Research</button>
+      </div></div>
 
-      <!-- LIVE MARKET -->
-      <section class="panel glass" role="tabpanel" id="p-live" aria-labelledby="t-live">
+      <!-- ══ 2 · SESSION — where we are in the day, and the levels that follow ══ -->
+      <section class="panel card" role="tabpanel" id="p-amd" aria-labelledby="t-amd">
+        <div class="sect-h"><h3>Session · Power of 3<button class="ib" type="button" data-i="amd" aria-label="What is this?" aria-expanded="false">i</button></h3>
+          <span class="note sp" id="amdMeta"></span></div>
+        <div id="amdBanner"></div>
+        <div id="amdProj" class="tiles" style="margin-top:12px"></div>
+        <svg class="chart" id="amdChart" viewBox="0 0 720 340" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Asia, London and New York session chart" style="margin-top:14px"></svg>
+        <div class="chart-foot"><div class="legend" id="amdLegend"></div></div>
+        <div class="sub-h">Levels<button class="ib" type="button" data-i="levels" aria-label="What is this?" aria-expanded="false">i</button></div>
+        <div class="list" id="amdLevels"></div>
+        <details class="mini"><summary>How to read this</summary><p class="note" id="amdNote" style="padding:0 13px 12px"></p></details>
+      </section>
+
+      <!-- ══ 3 · MARKET — live microstructure ══ -->
+      <section class="panel card" role="tabpanel" id="p-live" aria-labelledby="t-live">
+        <div class="sect-h"><h3>Live market<button class="ib" type="button" data-i="tokenized" aria-label="What is this?" aria-expanded="false">i</button></h3>
+          <span class="note sp" id="mktSource">—</span></div>
         <div class="mkthead">
-          <span class="eyebrow">Tokenized PLTRX<button class="ib" type="button" data-i="tokenized" aria-label="What is this?" aria-expanded="false">i</button> · <span id="mktSource">—</span></span>
           <span class="big mono" id="tokPx">—</span>
           <span class="chip flat" id="tokPct">—</span>
-          <span class="chip ghost tiny mono" id="tokBasis"></span>
+          <span class="chip tiny mono" id="tokBasis"></span>
           <span class="muted mono" id="tokSpread" style="font-size:12px"></span>
         </div>
-        <div id="exStrip" class="exstrip"></div>
-        <div id="cumVol" class="muted" style="font-size:11.5px;margin:-4px 0 12px"></div>
 
-        <div class="h3row">
-          <h3>Order book<button class="ib" type="button" data-i="book" aria-label="What is this?" aria-expanded="false">i</button></h3>
+        <div class="sect-h"><h3 style="font-size:13px">Order book · cumulative<button class="ib" type="button" data-i="book" aria-label="What is this?" aria-expanded="false">i</button></h3>
+          <span class="note" id="bookSrc"></span>
           <div class="sp"></div>
-          <span class="blab">Show sizes in</span>
           <div class="seg" id="unitSeg" role="group" aria-label="Order book units">
             <button type="button" data-u="base" aria-pressed="true">PLTR</button>
             <button type="button" data-u="usdt" aria-pressed="false">USDT</button>
@@ -398,98 +482,104 @@ html{background:var(--bg-0)}
         </div>
         <div class="imb"><div class="bar"><div class="b" id="imbBar" style="width:50%"></div></div>
           <div class="lab"><span class="u" id="imbBid">Bids —</span><span class="d" id="imbAsk">Asks —</span></div></div>
-        <div class="muted" style="font-size:11px;margin-top:2px">Order-book imbalance<button class="ib" type="button" data-i="imbalance" aria-label="What is this?" aria-expanded="false">i</button></div>
+        <div class="muted" style="font-size:11px;margin-top:3px">Order-book imbalance<button class="ib" type="button" data-i="imbalance" aria-label="What is this?" aria-expanded="false">i</button></div>
+        <div class="muted" id="bookNote" style="font-size:11px;margin-top:5px"></div>
 
-        <div class="h3row mt"><h3>Buy / sell tape<button class="ib" type="button" data-i="tape" aria-label="What is this?" aria-expanded="false">i</button></h3><span class="muted" style="font-size:11.5px">large prints highlighted</span></div>
+        <div class="sub-h">Tape<button class="ib" type="button" data-i="tape" aria-label="What is this?" aria-expanded="false">i</button></div>
         <div class="tape" id="tape"></div>
 
-        <div class="h3row mt"><h3>Large orders<button class="ib" type="button" data-i="large" aria-label="What is this?" aria-expanded="false">i</button></h3><span class="muted" style="font-size:11.5px" id="largeThresh"></span></div>
-        <div id="largeOrders"></div>
+        <details class="mini">
+          <summary>Venues, volume &amp; large prints</summary>
+          <div style="padding:0 13px 13px">
+            <div class="sub-h" style="margin-top:0">Depth contributed per venue</div>
+            <div class="list" id="bookVenues" style="margin-bottom:14px"></div>
+            <div class="sub-h">Price pool</div>
+            <div id="exStrip" class="exstrip"></div>
+            <div id="cumVol" class="muted" style="font-size:11.5px;margin:-4px 0 12px"></div>
+            <div class="sect-h" style="margin-bottom:8px"><h3 style="font-size:13px">Large orders<button class="ib" type="button" data-i="large" aria-label="What is this?" aria-expanded="false">i</button></h3><span class="note sp" id="largeThresh"></span></div>
+            <div id="largeOrders"></div>
+          </div>
+        </details>
       </section>
 
-      <!-- OVERVIEW (real stock) -->
-      <section class="panel glass" role="tabpanel" id="p-over" aria-labelledby="t-over" hidden>
-        <h3>NASDAQ PLTR — last 20 sessions</h3>
-        <svg class="chart" id="stockChart" viewBox="0 0 720 300" preserveAspectRatio="xMidYMid meet" role="img" aria-label="PLTR price"></svg>
-        <div class="chart-foot"><span>Daily close</span><span id="chartRange"></span></div>
-        <h3 class="mt">Snapshot</h3>
-        <div class="tiles" id="tiles"></div>
-      </section>
-
-      <!-- FUNDAMENTALS -->
-      <section class="panel glass" role="tabpanel" id="p-fund" aria-labelledby="t-fund" hidden>
-        <h3>Valuation &amp; structure</h3>
-        <div class="tiles" id="fundTiles"></div>
-        <h3 class="mt">Analyst targets · 12-month</h3>
-        <div class="rows" id="tgtRows"></div>
-        <h3 class="mt">Technicals &amp; positioning<button class="ib" type="button" data-i="technicals" aria-label="What is this?" aria-expanded="false">i</button></h3>
-        <div class="rows" id="techRows"></div>
-      </section>
-
-      <!-- PROJECTION -->
-      <section class="panel glass" role="tabpanel" id="p-proj" aria-labelledby="t-proj" hidden>
-        <h3>Expected range — next 5 sessions<button class="ib" type="button" data-i="projection" aria-label="What is this?" aria-expanded="false">i</button></h3>
+      <!-- ══ 5 · PROJECTION ══ -->
+      <section class="panel card" role="tabpanel" id="p-proj" aria-labelledby="t-proj">
+        <div class="sect-h"><h3>Expected range · next 5 sessions<button class="ib" type="button" data-i="projection" aria-label="What is this?" aria-expanded="false">i</button></h3></div>
         <div class="projbar" id="projbar"></div>
         <div class="projends"><span id="projLow">—</span><span id="projHigh">—</span></div>
         <div class="scen" id="scen"></div>
-        <p class="thesis" style="margin-top:16px"><span class="badge">Method</span>Band anchored on the last NASDAQ close and sized to the 20-session range and daily volatility (~±5% over a week). The composite signal above blends trend, momentum, tokenized order-flow, valuation and AI-scored news.</p>
-      </section>
-      <!-- OPEN-WINDOW EDGE (backtest) -->
-      <section class="panel glass" role="tabpanel" id="p-edge" aria-labelledby="t-edge" hidden>
-        <div id="btVerdict"></div>
-        <h3 class="mt">Where the move happens — avg move per minute after the open (16:30 EAT)</h3>
-        <div id="btProfile"></div>
-        <p class="muted" style="font-size:11.5px;margin:6px 2px 0">Bars = average absolute price move in each minute of the open window, across the backtested days. Taller early bars confirm the 16:30–16:32 concentration.</p>
-        <h3 class="mt">Models tested — out-of-sample (held-out newest 30% of days)<button class="ib" type="button" data-i="oos" aria-label="What is this?" aria-expanded="false">i</button></h3>
-        <div class="rows" id="btRules"></div>
-        <h3 class="mt">Read &amp; caveats</h3>
-        <div id="btNotes"></div>
       </section>
 
-      <!-- AMD / POWER OF 3 -->
-      <section class="panel glass" role="tabpanel" id="p-amd" aria-labelledby="t-amd" hidden>
-        <div id="amdBanner"></div>
-        <h3 class="mt">PLTR price movement — Asia / London / New York<button class="ib" type="button" data-i="amd" aria-label="What is this?" aria-expanded="false">i</button></h3>
-        <svg class="chart" id="amdChart" viewBox="0 0 720 340" preserveAspectRatio="xMidYMid meet" role="img" aria-label="AMD session chart"></svg>
-        <div class="chart-foot"><div class="legend" id="amdLegend"></div><span id="amdMeta"></span></div>
-        <div id="amdProj" class="tiles" style="margin-top:12px"></div>
-        <h3 class="mt">Levels<button class="ib" type="button" data-i="levels" aria-label="What is this?" aria-expanded="false">i</button></h3>
-        <div class="rows" id="amdLevels"></div>
-        <p class="note" id="amdNote"></p>
+      <!-- ══ 6 · CHART & SNAPSHOT ══ -->
+      <section class="panel card" role="tabpanel" id="p-over" aria-labelledby="t-over">
+        <div class="sect-h"><h3>NASDAQ PLTR · last 20 sessions</h3><span class="note sp" id="chartRange"></span></div>
+        <svg class="chart" id="stockChart" viewBox="0 0 720 300" preserveAspectRatio="xMidYMid meet" role="img" aria-label="PLTR daily closes"></svg>
+        <div class="sub-h">Snapshot</div>
+        <div class="tiles" id="tiles"></div>
       </section>
 
-      <!-- INSIDERS & CONGRESS -->
-      <section class="panel glass" role="tabpanel" id="p-filings" aria-labelledby="t-fil" hidden>
-        <div class="h3row"><h3>Who else is trading PLTR<button class="ib" type="button" data-i="filings" aria-label="What is this?" aria-expanded="false">i</button></h3><span class="muted sp" style="font-size:11px" id="filAsOf"></span></div>
-        <div class="fsum" id="filSum"></div>
+      <!-- ══ 7 · RESEARCH — slower-moving, folded away by default ══ -->
+      <div id="p-research" class="panel" style="padding:0;display:flex;flex-direction:column;gap:12px">
 
-        <div class="h3row mt"><h3>Company insiders — SEC Form 4<button class="ib" type="button" data-i="form4" aria-label="What is this?" aria-expanded="false">i</button></h3><span class="muted" style="font-size:11.5px">filed within 2 business days</span></div>
-        <div id="filIns"></div>
+        <details class="fold panel card" id="p-fund">
+          <summary>Fundamentals<span class="why">valuation, targets, technicals</span></summary>
+          <div class="foldbody">
+            <div class="tiles" id="fundTiles"></div>
+            <div class="sub-h">Analyst targets · 12-month</div>
+            <div class="list" id="tgtRows"></div>
+            <div class="sub-h">Technicals &amp; positioning<button class="ib" type="button" data-i="technicals" aria-label="What is this?" aria-expanded="false">i</button></div>
+            <div class="list" id="techRows"></div>
+          </div>
+        </details>
 
-        <div class="h3row mt"><h3>US politicians — STOCK Act<button class="ib" type="button" data-i="stockact" aria-label="What is this?" aria-expanded="false">i</button></h3><span class="muted" style="font-size:11.5px">filed within 45 days — dates lag</span></div>
-        <div id="filCon"></div>
+        <details class="fold panel card" id="p-edge">
+          <summary>Open-window edge<span class="why">16:30 EAT backtest</span></summary>
+          <div class="foldbody">
+            <div id="btVerdict"></div>
+            <div class="sub-h">Average move per minute after the open</div>
+            <div id="btProfile"></div>
+            <p class="muted" style="font-size:11.5px;margin:6px 2px 0">Bars = average absolute move in each minute of the open window across the backtested days. Taller early bars confirm the 16:30–16:32 concentration.</p>
+            <div class="sub-h">Models tested · out-of-sample<button class="ib" type="button" data-i="oos" aria-label="What is this?" aria-expanded="false">i</button></div>
+            <div class="list" id="btRules"></div>
+            <div class="sub-h">Read &amp; caveats</div>
+            <div id="btNotes"></div>
+          </div>
+        </details>
 
-        <p class="thesis" style="margin-top:16px"><span class="badge">Sources</span>Insider rows come straight from PLTR's own SEC EDGAR filings index (issuer CIK 0001321655) and each Form 4's XML. Congressional rows come from the public House and Senate periodic-transaction-report datasets. Both are free public disclosures — nothing here is a live position, only what has already been filed.</p>
-      </section>
+        <details class="fold panel card" id="p-filings">
+          <summary>Insiders &amp; Congress<span class="why">Form 4 · STOCK Act</span></summary>
+          <div class="foldbody">
+            <div class="sect-h"><h3 style="font-size:13px">Who else is trading PLTR<button class="ib" type="button" data-i="filings" aria-label="What is this?" aria-expanded="false">i</button></h3><span class="note sp" id="filAsOf"></span></div>
+            <div class="fsum" id="filSum"></div>
+            <div class="sub-h">Company insiders · SEC Form 4<button class="ib" type="button" data-i="form4" aria-label="What is this?" aria-expanded="false">i</button></div>
+            <div id="filIns"></div>
+            <div class="sub-h">US politicians · STOCK Act<button class="ib" type="button" data-i="stockact" aria-label="What is this?" aria-expanded="false">i</button></div>
+            <div id="filCon"></div>
+          </div>
+        </details>
+
+      </div>
     </main>
 
+    <!-- ══ 4 · NEWS — sentiment folded into the same card ══ -->
     <aside class="rail">
-      <section class="senti glass">
-        <div class="top-r"><span class="eyebrow">AI news sentiment<button class="ib" type="button" data-i="sentiment" aria-label="What is this?" aria-expanded="false">i</button></span><span class="val flat" id="sentiVal">—</span></div>
-        <div class="meter"><div class="m-up" id="mUp" style="width:0%"></div><div class="m-fl" id="mFl" style="width:0%"></div></div>
-        <div class="keys"><span><i class="kd u"></i>Bull <b id="cUp">0</b></span><span><i class="kd f"></i>Neut <b id="cFl">0</b></span><span><i class="kd d"></i>Bear <b id="cDn">0</b></span></div>
-        <div class="thesis" id="thesis"><span class="badge">Desk read</span><span id="thesisTxt">Waiting for the agent…</span></div>
-      </section>
-      <section class="feed glass">
-        <div class="fhead"><h3>Live news<button class="ib" type="button" data-i="news" aria-label="What is this?" aria-expanded="false">i</button></h3><span class="chip flat tiny" id="feedCount">—</span></div>
-        <div id="feed"></div>
-        <div class="agentbar"><span class="dot on"></span><span id="agentMsg">AI agent scores headlines every ~5 min.</span></div>
+      <section class="panel card" id="s-news" aria-labelledby="t-news" style="padding:15px 16px">
+        <div class="sect-h" style="margin-bottom:10px"><h3>News<button class="ib" type="button" data-i="news" aria-label="What is this?" aria-expanded="false">i</button></h3>
+          <span class="chip tiny sp" id="feedCount">—</span></div>
+        <div class="senti-row">
+          <div class="meter"><div class="m-up" id="mUp" style="width:0%"></div><div class="m-fl" id="mFl" style="width:0%"></div></div>
+          <div class="keys"><span><i class="kd u"></i><b id="cUp">0</b></span><span><i class="kd f"></i><b id="cFl">0</b></span><span><i class="kd d"></i><b id="cDn">0</b></span></div>
+          <span class="val flat" id="sentiVal">—</span>
+        </div>
+        <div class="thesis" id="thesis"><span class="badge">Desk read<button class="ib" type="button" data-i="sentiment" aria-label="What is this?" aria-expanded="false">i</button></span><span id="thesisTxt">Waiting for the agent…</span></div>
+        <div id="feed" style="margin-top:6px"></div>
+        <div class="agentbar"><span class="dot on"></span><span id="agentMsg">Google every 5 min · other feeds every 8s.</span></div>
       </section>
     </aside>
   </div>
 
-  <footer class="foot glass">
-    <div class="discl"><b>Not financial advice.</b> Informational tool. Tokenized PLTRX is a separate, thinner market that tracks — but can diverge from — NASDAQ PLTR. Signals are model-derived and can be wrong.</div>
+  <footer class="foot card">
+    <div class="discl"><b>Not financial advice.</b> Tokenized PLTRX is a separate, thinner market that tracks — but can diverge from — NASDAQ PLTR. Signals are model-derived and can be wrong.</div>
     <div id="footMeta" class="muted">—</div>
   </footer>
 </div>
@@ -526,7 +616,7 @@ const GLOSSARY={
  timeframes:["Short-term signals (1M–15M)","The same call recomputed over the last 1, 3, 5, 10 and 15 minutes of live tick data, then nudged by the bigger picture (price vs the 50- and 200-day moving averages). When all five line up, the move has follow-through; when they split, it's noise.",""],
  factors:["Indicators driving the call","Every input the composite used, with its direction (▲ bullish, ▼ bearish, → neutral) and the number behind it. <b>Trend</b> = price vs moving averages. <b>Momentum</b> = RSI. <b>Order flow</b> = live book and tape pressure. <b>Basis</b> = tokenized vs real price gap. <b>Valuation</b> = P/E. <b>News</b> = AI sentiment. <b>AMD</b> = the session model.",""],
  tokenized:["Tokenized PLTR (PLTRX)","Palantir stock itself only trades on NASDAQ, which has no public order book and closes at night. Crypto venues list a <b>tokenized</b> PLTR contract that trades nearly 24/5 — that is the only PLTR market with a visible order book, a trade tape, and Asia/London sessions, so it is what powers this panel.","It is a separate, thinner market. It tracks NASDAQ but can drift, especially outside US hours."],
- book:["Order book","Live resting orders on the tokenized market. <b>Bids</b> are buyers waiting below; <b>asks</b> are sellers waiting above. The shaded bar behind each row shows that level's size relative to the biggest level on screen. Switch <b>PLTR ⇄ USDT</b> to read sizes as share counts or as dollar value.",""],
+ book:["Order book (cumulative)","Every venue in the pool merged into <b>one</b> book, not a single exchange. Prices are bucketed onto a common tick — bids rounded down, asks rounded up — so the merge never invents a better price than a venue actually showed. Sizes are converted to PLTR first: OKX, Gate, KuCoin and MEXC quote in <b>contracts</b>, so each is multiplied by its contract size before being added. Switch <b>PLTR ⇄ USDT</b> to read the depth as share counts or dollar value.","Venues sometimes disagree by a cent, which makes the merged book cross. That is real arbitrage; anything through the mid is trimmed and reported rather than hidden."],
  imbalance:["Order-book imbalance","Resting bid size as a share of total resting size. Above ~60% means buyers are stacked deeper than sellers — a short-term upward lean, and vice versa.","Resting orders can be pulled instantly. Treat it as pressure, not commitment."],
  tape:["Buy / sell tape","Trades as they actually print. Green = the buyer crossed the spread (aggressive buying), red = the seller did. This is executed volume, so it is harder to fake than the book.",""],
  large:["Large orders","Individual prints above the size threshold shown. Clusters of large buys or sells often mark where a bigger participant is working an order.",""],
@@ -600,12 +690,16 @@ const usz=(px,sz)=>UNITS==="usdt"?money0(px*sz):num(sz,2);
   b.onclick=()=>{const c=root.getAttribute("data-theme");const d=c?c==="dark":false;
     const n=d?"light":"dark";root.setAttribute("data-theme",n);try{localStorage.setItem("pltr-theme",n);}catch(e){}};})();
 
-(function(){const tabs=$$(".tab"),map={"t-live":"p-live","t-over":"p-over","t-fund":"p-fund","t-proj":"p-proj","t-edge":"p-edge","t-amd":"p-amd","t-fil":"p-filings"};
+(function(){const tabs=$$(".tab"),map={"t-amd":"p-amd","t-live":"p-live","t-news":"s-news","t-proj":"p-proj","t-over":"p-over","t-res":"p-research"};
   $$(".panel").forEach(p=>p.hidden=false);           // one-pager: every panel visible, tabs just jump
+  const anchors=Object.values(map).map(id=>document.getElementById(id)).filter(Boolean);
   tabs.forEach(t=>t.onclick=()=>{const el=$("#"+map[t.id]);if(el)el.scrollIntoView({behavior:"smooth",block:"start"});});
   const byPanel={};Object.entries(map).forEach(([tb,pn])=>byPanel[pn]=tb);
+  const wrap=document.querySelector(".tabwrap"),strip=$(".tabs");
+  const fade=()=>{if(wrap&&strip)wrap.classList.toggle("more",strip.scrollWidth-strip.clientWidth-strip.scrollLeft>8);};
+  if(strip){strip.addEventListener("scroll",fade,{passive:true});addEventListener("resize",fade);fade();setTimeout(fade,400);}
   const io=new IntersectionObserver(es=>{es.forEach(e=>{if(e.isIntersecting){const tb=byPanel[e.target.id];tabs.forEach(t=>t.setAttribute("aria-selected",t.id===tb));}});},{rootMargin:"-140px 0px -60% 0px"});
-  $$(".panel").forEach(p=>io.observe(p));})();
+  anchors.forEach(p=>io.observe(p));})();
 
 async function tick(){
   let st;
@@ -636,19 +730,26 @@ function render(st){
   if(c.mark!=null||c.last!=null){const up=(c.pct24h||0)>=0;$("#hTok").textContent=(c.priceSource||"PLTR")+" "+money(c.mark!=null?c.mark:c.last);
     $("#hTok").className="chip tiny mono "+(up?"up":"down");}
   const phaseMap={pre:"Pre-market",regular:"Market open",post:"After-hours",closed:"Market closed"};
-  if(s.marketPhase){const hp=$("#hPhase");hp.hidden=false;hp.textContent=phaseMap[s.marketPhase]||s.marketPhase;
-    hp.className="chip tiny "+(s.marketPhase==="regular"?"up":s.marketPhase==="closed"?"ghost":"flat");}
-  if(s.extendedPrice!=null){const he=$("#hExt");he.hidden=false;const up=(s.extendedPct||0)>=0;
+  // the extended-hours chip already names the session, so only show the bare
+  // phase chip when there is no extended quote to say it for us
+  const phaseTxt=s.marketPhase?(phaseMap[s.marketPhase]||s.marketPhase):"";
+  const hasExt=s.extendedPrice!=null;
+  if(hasExt){const he=$("#hExt");he.hidden=false;const up=(s.extendedPct||0)>=0;
     he.textContent=`${s.extendedLabel||"Ext"} ${money(s.extendedPrice)} ${up?"+":""}${s.extendedPct}%`;
     he.className="chip tiny mono "+(up?"up":"down");} else {$("#hExt").hidden=true;}
+  const hp=$("#hPhase");
+  const dupe=hasExt&&phaseTxt&&(s.extendedLabel||"").toLowerCase().includes(phaseTxt.toLowerCase().split(" ")[0]);
+  if(phaseTxt&&!dupe){hp.hidden=false;hp.textContent=phaseTxt;
+    hp.className="chip tiny "+(s.marketPhase==="regular"?"up":s.marketPhase==="closed"?"":"flat");}
+  else{hp.hidden=true;}
   $("#updated").textContent=s.quoteTimeMs?("close "+eat(s.quoteTimeMs)+" EAT"):(meta.stockAsOf?("stock "+ago(new Date(meta.stockAsOf).getTime())+" ago"):"—");
 
   // signal
-  if(sig.word){$("#sigWord").textContent=sig.word;$("#sigWord").className="sig-word "+(sig.cls||"side");
+  if(sig.word){$("#sigWord").textContent=sig.word;$("#sigWord").className="callword "+(sig.cls||"side");
     $("#sigBias").textContent=sig.bias||"";$("#confFill").style.width=(sig.conf||0)+"%";
-    $("#confVal").textContent=(sig.conf||0)+"% · "+(sig.confLabel||"");
+    $("#confVal").textContent=(sig.conf||0)+"%"+(sig.confLabel?" · "+sig.confLabel:"");
     $("#factors").innerHTML=(sig.factors||[]).map(f=>{const g=factorKey(f[0]);
-    return `<div class="factor glass-inset"><div class="k">${esc(f[0])}${g?`<button class="ib" type="button" data-i="${g}" aria-label="What is this?" aria-expanded="false">i</button>`:""}</div><div class="v"><span class="arrow ${f[1]}">${f[1]==="u"?"▲":f[1]==="d"?"▼":"→"}</span><small>${esc(f[2])}</small></div></div>`;}).join("");}
+    return `<div class="factor"><div class="k">${esc(f[0])}${g?`<button class="ib" type="button" data-i="${g}" aria-label="What is this?" aria-expanded="false">i</button>`:""}</div><div class="v"><span class="arrow ${f[1]}">${f[1]==="u"?"▲":f[1]==="d"?"▼":"→"}</span><small>${esc(f[2])}</small></div></div>`;}).join("");}
 function factorKey(name){const n=(name||"").toLowerCase();
   if(n.startsWith("trend"))return"trend"; if(n.startsWith("momentum"))return"momentum";
   if(n.startsWith("order flow"))return"orderflow"; if(n.startsWith("basis"))return"basis";
@@ -658,7 +759,7 @@ function factorKey(name){const n=(name||"").toLowerCase();
   $("#tfStrip").innerHTML=(tfs.length?tfs.map(t=>`<div class="tf ${t.cls}"><div class="t">${t.tf}</div><div class="w">${t.word}</div><div class="r">${t.ret!=null?(t.ret>=0?"+":"")+t.ret+"%":"warming"}</div></div>`).join(""):`<span class="muted" style="font-size:12px">warming up — 1–15M signals appear as live prices stream in</span>`);
 
   // ---- live market ----
-  $("#mktSource").textContent=(c.depthSource||c.priceSource||"—")+(meta.exchanges&&meta.exchanges.length?` · pool of ${meta.exchanges.length}`:"");
+  $("#mktSource").textContent=(meta.exchanges&&meta.exchanges.length?`${meta.exchanges.length} perp venues`:(c.priceSource||"—"));
   const cpx=(c.mark!=null?c.mark:c.last);
   if(cpx!=null){
     const el=$("#tokPx");if(tokLast!=null&&cpx!==tokLast){el.classList.remove("flash-up","flash-dn");void el.offsetWidth;el.classList.add(cpx>tokLast?"flash-up":"flash-dn");}
@@ -671,10 +772,13 @@ function factorKey(name){const n=(name||"").toLowerCase();
   $("#exStrip").innerHTML=ek.length?ek.map(k=>`<span class="expill"><span class="nm">${k}</span><b class="mono">${money(exs[k].mark||exs[k].price)}</b></span>`).join(""):`<span class="muted" style="font-size:11px">connecting to exchange pool…</span>`;
   const prem=(c.premiumPct!=null?c.premiumPct:sig.basis);
   if(prem!=null){const bt=$("#tokBasis");bt.textContent=`${prem>0?"+":""}${prem}% vs stock${c.stockRef?" $"+(+c.stockRef).toFixed(2):""}`;
-    bt.className="chip tiny mono "+(Math.abs(prem)<0.3?"ghost":prem>0?"down":"up");}
+    bt.className="chip tiny mono "+(Math.abs(prem)<0.3?"":prem>0?"down":"up");}
   else{$("#tokBasis").textContent="";}
   const nvenue=exs?Object.keys(exs).length:0;
-  if(c.cumVolUsd||c.cumVol){$("#cumVol").textContent=`Cumulative 24h volume across ${nvenue} venue${nvenue!=1?"s":""}: ≈$${big(c.cumVolUsd||0)}  (${big(c.cumVol||0)} contracts/base)`;}
+  if(c.cumVolUsd||c.cumVol){
+    const ex2=meta.excluded||{},nx=Object.keys(ex2).length;
+    $("#cumVol").innerHTML=`Cumulative 24h volume across ${nvenue} venue${nvenue!=1?"s":""}: ≈$${big(c.cumVolUsd||0)} (${big(c.cumVol||0)} contracts/base)`
+      +(nx?`<br><span style="color:var(--ink-3)">${nx} venue${nx!=1?"s":""} screened out for quoting a different instrument: ${Object.entries(ex2).map(([k,v])=>esc(k)+" "+esc(v)).join(" · ")}</span>`:"");}
   else{$("#cumVol").textContent="";}
   window._lastCrypto=c;renderBook(c);renderTape(c);renderLarge(c);
 
@@ -688,27 +792,27 @@ function factorKey(name){const n=(name||"").toLowerCase();
     ["Volume",s.volume?num(s.volume/1e6,1)+"M":"—",s.avgVolume?"avg "+num(s.avgVolume/1e6,1)+"M":"",""],
     ["Market cap",capM(s.marketCap),s.pe?"P/E "+s.pe:"",""],
     ["RSI (14)",s.rsi!=null?s.rsi:"—",s.rsi>70?"Overbought":s.rsi<30?"Oversold":"Neutral",""]
-  ].map(t=>`<div class="tile glass-inset"><div class="k">${t[0]}</div><div class="v ${t[3]} mono">${t[1]}</div><div class="x mono">${t[2]}</div></div>`).join("");
+  ].map(t=>`<div class="tile"><div class="k">${t[0]}</div><div class="v ${t[3]} mono">${t[1]}</div><div class="x mono">${t[2]}</div></div>`).join("");
 
   // ---- fundamentals ----
   $("#fundTiles").innerHTML=[
     ["P/E",s.pe??"—"],["Fwd P/E",s.fwdPe??"—"],["Market cap",capM(s.marketCap)],
     ["Beta",s.beta!=null?(+s.beta).toFixed(2):"—"],["Shares out",s.sharesOut?num(s.sharesOut/1e9,2)+"B":"—"],
     ["Short % float",s.shortPctFloat!=null?s.shortPctFloat+"%":"—"]
-  ].map(t=>`<div class="tile glass-inset"><div class="k">${t[0]}</div><div class="v mono">${t[1]}</div></div>`).join("");
+  ].map(t=>`<div class="tile"><div class="k">${t[0]}</div><div class="v mono">${t[1]}</div></div>`).join("");
   const up=v=>v==null?"":(s.price&&v>s.price?"up":"down");
   $("#tgtRows").innerHTML=[
     ["Rating",s.recommendation||"—",s.numAnalysts?s.numAnalysts+" analysts":"",""],
     ["Average target",money(s.targetMean),s.targetMean&&s.price?((s.targetMean/s.price-1)*100).toFixed(1)+"%":"",up(s.targetMean)],
     ["Median target",money(s.targetMedian),s.targetMedian&&s.price?((s.targetMedian/s.price-1)*100).toFixed(1)+"%":"",up(s.targetMedian)],
     ["High / Low",money(s.targetHigh)+" / "+money(s.targetLow),"",""]
-  ].map(r=>`<div class="row"><span class="k">${r[0]}</span><span class="v mono">${r[1]}${r[2]?`<span class="tag2 ${r[3]||"flat"}">${r[2]}</span>`:""}</span></div>`).join("");
+  ].map(r=>`<div class="item"><span class="k">${r[0]}</span><span class="v mono">${r[1]}${r[2]?`<span class="tag ${r[3]||"flat"}">${r[2]}</span>`:""}</span></div>`).join("");
   $("#techRows").innerHTML=[
     ["vs 50-day MA",money(s.dma50),s.dma50&&s.price?((s.price/s.dma50-1)*100).toFixed(1)+"%":"",s.dma50&&s.price>s.dma50?"up":"down"],
     ["vs 200-day MA",money(s.dma200),s.dma200&&s.price?((s.price/s.dma200-1)*100).toFixed(1)+"%":"",s.dma200&&s.price>s.dma200?"up":"down"],
     ["Short ratio",s.shortRatio??"—","days to cover","flat"],
     ["Next earnings",s.nextEarnings||"—","","flat"]
-  ].map(r=>`<div class="row"><span class="k">${r[0]}</span><span class="v mono">${r[1]}${r[2]?`<span class="tag2 ${r[3]||"flat"}">${r[2]}</span>`:""}</span></div>`).join("");
+  ].map(r=>`<div class="item"><span class="k">${r[0]}</span><span class="v mono">${r[1]}${r[2]?`<span class="tag ${r[3]||"flat"}">${r[2]}</span>`:""}</span></div>`).join("");
 
   // ---- projection ----
   if(sig.proj)renderProj(sig.proj);
@@ -724,7 +828,7 @@ function factorKey(name){const n=(name||"").toLowerCase();
   sv.className="val "+(net>1?"up":net<-1?"down":"flat");
   $("#thesisTxt").textContent=ag.thesis||"Waiting for the agent…";
   const feed=[...news.map(n=>({...n,kind:n.kind||"news"})),...tweets.map(t=>({...t,kind:"tweet"}))]
-    .sort((a,b)=>(b.ts||0)-(a.ts||0)).slice(0,9);
+    .sort((a,b)=>(b.ts||0)-(a.ts||0)).slice(0,8);
   $("#feedCount").textContent=feed.length+" items";
   $("#feed").innerHTML=feed.map(it=>{const d=it.dir||"flat";const lbl=d==="up"?"Bullish":d==="down"?"Bearish":"Neutral";
     const isTw=it.kind==="tweet";const src=isTw?("𝕏 "+(it.src||"")):(it.src||"News");
@@ -738,10 +842,23 @@ function factorKey(name){const n=(name||"").toLowerCase();
 
 function renderBook(c){
   const bids=c.bids||[],asks=c.asks||[],U=UNITS==="usdt";
+  const bs=$("#bookSrc"); if(bs)bs.textContent=c.depthSource||"";
+  const bn=$("#bookNote");
+  if(bn){const nv=(c.depthVenues||[]).length;
+    bn.innerHTML=nv?`Every venue's book merged onto a ${money(c.bookTick||0.01).replace("$","$")} tick, sizes converted to PLTR (contract venues multiplied out).`
+      +(c.bookCrossedPct>0.5?` <span style="color:var(--flat)">${c.bookCrossedPct}% of depth crossed between venues and was trimmed to the mid.</span>`:""):"";}
+  const bvEl=$("#bookVenues");
+  if(bvEl){const pv=c.bookPerVenue||{};const ent=Object.entries(pv);
+    const tot=ent.reduce((a,[,v])=>a+(v.bidVol||0)+(v.askVol||0),0)||1;
+    bvEl.innerHTML=ent.sort((a,b)=>((b[1].bidVol||0)+(b[1].askVol||0))-((a[1].bidVol||0)+(a[1].askVol||0)))
+      .map(([n,v])=>{const sh=(((v.bidVol||0)+(v.askVol||0))/tot*100);
+        return `<div class="item"><span class="k">${esc(n)}${v.mult&&v.mult!=1?` <span class="muted">×${v.mult} PLTR/contract</span>`:""}</span>`
+          +`<span class="v mono">${sh.toFixed(0)}%<span class="tag">${num((v.bidVol||0)+(v.askVol||0),1)} PLTR</span></span></div>`;}).join("")
+      ||`<div class="emptybox">Waiting for venue books.</div>`;}
   const w=([p,sz])=>U?p*sz:sz;                       // bar width follows the displayed unit
   const mx=Math.max(1e-9,...bids.map(w),...asks.map(w));
-  $("#bookBids").innerHTML=bids.slice(0,12).map(([p,sz])=>`<div class="brow bids"><span class="depth" style="width:${(w([p,sz])/mx*100).toFixed(0)}%"></span><span class="s mono">${usz(p,sz)}</span><span class="p mono">${money(p)}</span></div>`).join("")||`<div class="muted" style="padding:8px">—</div>`;
-  $("#bookAsks").innerHTML=asks.slice(0,12).map(([p,sz])=>`<div class="brow asks"><span class="depth" style="width:${(w([p,sz])/mx*100).toFixed(0)}%"></span><span class="p mono">${money(p)}</span><span class="s mono">${usz(p,sz)}</span></div>`).join("")||`<div class="muted" style="padding:8px">—</div>`;
+  $("#bookBids").innerHTML=bids.slice(0,9).map(([p,sz])=>`<div class="brow bids"><span class="depth" style="width:${(w([p,sz])/mx*100).toFixed(0)}%"></span><span class="s mono">${usz(p,sz)}</span><span class="p mono">${money(p)}</span></div>`).join("")||`<div class="muted" style="padding:8px">—</div>`;
+  $("#bookAsks").innerHTML=asks.slice(0,9).map(([p,sz])=>`<div class="brow asks"><span class="depth" style="width:${(w([p,sz])/mx*100).toFixed(0)}%"></span><span class="p mono">${money(p)}</span><span class="s mono">${usz(p,sz)}</span></div>`).join("")||`<div class="muted" style="padding:8px">—</div>`;
   const bv=c.bidVol||0,av=c.askVol||0,t=bv+av||1;
   const mid=c.mark||c.price||(bids[0]&&asks[0]?(bids[0][0]+asks[0][0])/2:0)||0;
   const fmt=U?(v=>money0(v*mid)):(v=>num(v,1)+" PLTR");
@@ -750,20 +867,20 @@ function renderBook(c){
   $("#imbAsk").textContent="Asks "+fmt(av)+" ("+(av/t*100).toFixed(0)+"%)";
 }
 function renderTape(c){
-  const tp=c.tape||[],U=UNITS==="usdt";
+  const tp=(c.tape||[]).slice(0,14),U=UNITS==="usdt";
   $("#tape").innerHTML=tp.map(t=>`<div class="trow ${t.side}${t.usd>=(largeThresh())?" big":""}"><span class="p mono">${money(t.px)}</span><span class="s mono">${U?money0(t.usd):num(t.sz,2)}</span><span class="side">${t.side}${t.block?' ▪':''}</span><span class="t mono">${U?num(t.sz,2)+" PLTR":money0(t.usd)}</span></div>`).join("")||`<div class="muted" style="padding:8px">No recent trades.</div>`;
 }
 let _thr=3000;function largeThresh(){return _thr;}
 function renderLarge(c){
   const lg=c.large||[];$("#largeThresh").textContent="≥ "+money0(_thr);
   const U=UNITS==="usdt";
-  $("#largeOrders").innerHTML=lg.length?`<div class="rows">`+lg.map(t=>`<div class="row"><span class="k mono">${money(t.px)} · ${U?money0(t.usd):num(t.sz,2)+" PLTR"}</span><span class="v mono">${U?num(t.sz,2)+" PLTR":money0(t.usd)}<span class="tag2 ${t.side==="buy"?"up":"down"}">${t.side}</span></span></div>`).join("")+`</div>`:`<div class="muted" style="padding:6px 2px">No large prints in the current window.</div>`;
+  $("#largeOrders").innerHTML=lg.length?`<div class="list">`+lg.map(t=>`<div class="item"><span class="k mono">${money(t.px)} · ${U?money0(t.usd):num(t.sz,2)+" PLTR"}</span><span class="v mono">${U?num(t.sz,2)+" PLTR":money0(t.usd)}<span class="tag ${t.side==="buy"?"up":"down"}">${t.side}</span></span></div>`).join("")+`</div>`:`<div class="muted" style="padding:6px 2px">No large prints in the current window.</div>`;
 }
 function renderProj(p){
   const mn=Math.min(p.low,p.bear)-4,mx=Math.max(p.high,p.bull)+4,sp=(mx-mn)||1,pos=v=>((v-mn)/sp*100);
   $("#projbar").innerHTML=`<div class="projtrack"></div><div class="projfill" style="left:${pos(p.low).toFixed(1)}%;width:${(pos(p.high)-pos(p.low)).toFixed(1)}%"></div><div class="projmark" data-l="now ${money(p.cur)}" style="left:${pos(p.cur).toFixed(1)}%"></div>`;
   $("#projLow").textContent="Floor "+money(p.low);$("#projHigh").textContent="Ceiling "+money(p.high);
-  $("#scen").innerHTML=[["bear","Bear",p.bear,"pivot breaks"],["base","Base",p.base,"range chop"],["bull","Bull",p.bull,"retest highs"]].map(x=>`<div class="c ${x[0]} glass-inset"><div class="t">${x[1]}</div><div class="p">${money(x[2])}</div><div class="d">${x[3]}</div></div>`).join("");
+  $("#scen").innerHTML=[["bear","Bear",p.bear,"pivot breaks"],["base","Base",p.base,"range chop"],["bull","Bull",p.bull,"retest highs"]].map(x=>`<div class="c ${x[0]}"><div class="t">${x[1]}</div><div class="p">${money(x[2])}</div><div class="d">${x[3]}</div></div>`).join("");
 }
 function drawChart(p){
   const W=720,H=300,padL=46,padR=14,padT=16,padB=26;
@@ -790,7 +907,7 @@ function renderBacktest(bt){
   P.innerHTML=`<div class="profile">`+mp.map(x=>`<div class="b ${x.m<=sig?"hot":""}" style="height:${(x.avgAbs/mx*100).toFixed(0)}%" title="min ${x.m}: ${(x.avgAbs*100).toFixed(2)}%"><b>${x.m}</b></div>`).join("")+`</div>`;
   const rules=(bt.rules||[]).filter(r=>r.testHit!=null).sort((a,b)=>b.testHit-a.testHit);
   R.innerHTML=rules.map(r=>{const pass=r.testHit>=0.7&&r.ciLow>0.5&&r.nTest>=30;
-    return `<div class="row"><span class="k">${esc(r.name)}</span><span class="v mono">${Math.round(r.testHit*100)}%<span class="tag2 ${pass?"up":"flat"}">n=${r.nTest}${r.ciLow!=null?" · floor "+Math.round(r.ciLow*100)+"%":""}</span></span></div>`;}).join("")||`<div class="muted" style="padding:6px">No rules with enough out-of-sample trades yet.</div>`;
+    return `<div class="item"><span class="k">${esc(r.name)}</span><span class="v mono">${Math.round(r.testHit*100)}%<span class="tag ${pass?"up":"flat"}">n=${r.nTest}${r.ciLow!=null?" · floor "+Math.round(r.ciLow*100)+"%":""}</span></span></div>`;}).join("")||`<div class="muted" style="padding:6px">No rules with enough out-of-sample trades yet.</div>`;
   N.innerHTML=(bt.notes||[]).map(n=>`<div class="notecard">${esc(n)}</div>`).join("")
     +`<div class="notecard"><b>Auto-trader readiness:</b> ${bt.passed70?"a rule passed out-of-sample — next step is a paper-trading harness against live PLTRX fills (16:30–16:45 EAT, weighted to 16:30–16:32) before any real capital.":"hold off on automating — no rule is reliable enough. Keep collecting data; the study re-runs daily."} POST /api/backtest/run to refresh on demand.</div>`;
 }
@@ -818,7 +935,7 @@ function renderAmd(a){
            ["Invalidation",money(lv.stop),"risk "+money(lv.risk),"down"],
            ["Target 1",money(lv.t1),(lv.rr1!=null?lv.rr1+"R":""),"up"],
            ["Target 2",money(lv.t2),(lv.rr2!=null?lv.rr2+"R":""),"up"]]:[])
-  ].map(r=>`<div class="row"><span class="k">${r[0]}</span><span class="v mono">${r[1]}${r[2]?`<span class="tag2 ${r[3]}">${r[2]}</span>`:""}</span></div>`).join("");
+  ].map(r=>`<div class="item"><span class="k">${r[0]}</span><span class="v mono">${r[1]}${r[2]?`<span class="tag ${r[3]}">${r[2]}</span>`:""}</span></div>`).join("");
   const P=a.projection||{};
   const pj=$("#amdProj");
   if(pj){
@@ -827,7 +944,7 @@ function renderAmd(a){
     if(P.down)t.push(["Potential downside",money(P.down.t1),(P.downPct!=null?P.downPct+"%":"")+" · ext "+money(P.down.t2),"down"]);
     if(P.invalid!=null)t.push(["Invalidation",money(P.invalid),"model wrong beyond here","down"]);
     t.push(["Model state",P.mode==="directional"?"Directional":"Both sides live",P.mode==="directional"?(P.bias||""):"awaiting sweep",""]);
-    pj.innerHTML=t.map(r=>`<div class="tile glass-inset"><div class="k">${r[0]}</div><div class="v ${r[3]} mono">${r[1]}</div><div class="x">${r[2]}</div></div>`).join("");
+    pj.innerHTML=t.map(r=>`<div class="tile"><div class="k">${r[0]}</div><div class="v ${r[3]} mono">${r[1]}</div><div class="x">${r[2]}</div></div>`).join("");
   }
   M.textContent=`${a.venue||""} ${a.symbol||""} · 5m candles · ${a.day||""}`;
   N.innerHTML=`<b>How to read it:</b> Each session has its own high and low on the chart — <b style="color:#0a84ff">blue for Asia</b>, <b style="color:#e5342a">red for London</b>, <b style="color:#1aa851">green for New York</b>, and the amber line marks the sweep with the side it took. Asia builds the range (blue) — that high and low are the liquidity. London sweeps one side to trap traders (red): a sweep of the <b>low</b> is bullish, of the <b>high</b> bearish. New York expands in the true direction (green). The setup only counts once price <b>reclaims</b> back inside the range after the sweep — entry there, invalidation beyond the sweep, first target the opposite side of the range. Runs on the tokenized PLTR perp, the only PLTR market that trades through Asia and London.`;
@@ -984,7 +1101,7 @@ function renderFilings(f){
     ["Congress buys",cc.buys??0,"STOCK Act","up"],
     ["Congress sells",cc.sells??0,"STOCK Act","down"],
     ["Members filing",sm.people??0,"distinct names",""]
-  ].map(t=>`<div class="tile glass-inset"><div class="k">${t[0]}</div><div class="v ${t[3]} mono">${t[1]}</div><div class="x">${t[2]}</div></div>`).join("");
+  ].map(t=>`<div class="tile"><div class="k">${t[0]}</div><div class="v ${t[3]} mono">${t[1]}</div><div class="x">${t[2]}</div></div>`).join("");
   el("filIns").innerHTML=ins.length?`<div class="fl">${ins.map(frow).join("")}</div>`
     :`<div class="emptybox">No Form 4 rows loaded yet. The desk re-checks SEC EDGAR every 30 minutes; if this stays empty, the host cannot reach <b>data.sec.gov</b>.</div>`;
   el("filCon").innerHTML=con.length?`<div class="fl">${con.map(frow).join("")}</div>`
@@ -995,6 +1112,9 @@ function renderFilings(f){
   addEventListener("resize",redraw);addEventListener("orientationchange",redraw);
   const host=document.querySelector("#amdChart")&&document.querySelector("#amdChart").parentElement;
   if(host&&window.ResizeObserver)new ResizeObserver(redraw).observe(host);})();
+
+(function(){const f=document.getElementById("whyFold");
+  if(f&&matchMedia("(min-width:1081px)").matches)f.open=true;})();
 
 pullFilings();setInterval(pullFilings,300000);
 pullAmd();setInterval(pullAmd,20000);

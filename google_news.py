@@ -17,7 +17,7 @@ Titles come back as "Headline - Publisher"; we split the publisher off and use i
 as the source label, so the feed shows Reuters/Bloomberg/Barron's rather than a
 wall of "Google News".
 """
-import asyncio, re, datetime as dt
+import asyncio, re, html, datetime as dt
 import xml.etree.ElementTree as ET
 from email.utils import parsedate_to_datetime
 
@@ -78,7 +78,7 @@ def _parse(text):
     except Exception:
         return out
     for it in root.iter("item"):
-        title = (it.findtext("title") or "").strip()
+        title = html.unescape((it.findtext("title") or "").strip())
         if not title:
             continue
         link = (it.findtext("link") or "").strip()
@@ -88,7 +88,7 @@ def _parse(text):
             if ch.tag.split("}")[-1] == "source":
                 src_el = ch
                 break
-        src = (src_el.text or "").strip() if src_el is not None else ""
+        src = html.unescape((src_el.text or "").strip()) if src_el is not None else ""
         headline, publisher = _split_publisher(title, src)
         out.append({"headline": headline, "url": link, "pub": pub, "ts": _ms(pub),
                     "src": publisher, "kind": "news", "via": "google"})

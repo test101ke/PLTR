@@ -13,7 +13,7 @@ Sources (all free, no API key):
   * Google News RSS        — broad catch-all
   * StockTwits API         — retail/social first-mention, frequently earliest of all
 """
-import asyncio, re, datetime as dt
+import asyncio, re, html, datetime as dt
 import xml.etree.ElementTree as ET
 from email.utils import parsedate_to_datetime
 
@@ -73,7 +73,7 @@ def _parse_xml(text, src):
                     if ch.tag.split("}")[-1] == n:
                         return (ch.text or "").strip() or (ch.attrib.get("href") or "")
             return ""
-        title = g("title")
+        title = html.unescape(g("title"))
         if not title:
             continue
         link = g("link")
@@ -94,7 +94,7 @@ async def _stocktwits(client):
     out = []
     try:
         for m in r.json().get("messages", [])[:15]:
-            out.append({"headline": m.get("body", "")[:220],
+            out.append({"headline": html.unescape(m.get("body", "") or "")[:220],
                         "url": f"https://stocktwits.com/message/{m.get('id')}",
                         "src": "StockTwits @" + (m.get("user", {}).get("username") or ""),
                         "ts": _ms(m.get("created_at")), "pub": m.get("created_at"),

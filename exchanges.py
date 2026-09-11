@@ -42,8 +42,21 @@ def _pick(cands):
 # ---- Bybit (linear perp + spot) ----
 async def _bybit(client, cat, name):
     if name not in _SYM:
-        j = await _gj(client, f"https://api.bybit.com/v5/market/instruments-info?category={cat}")
-        cands = [x["symbol"] for x in j["result"]["list"]] if j and j.get("result") else []
+        # instruments-info is paginated at 500 and Bybit lists thousands of linear
+        # contracts — without following the cursor the tokenized stock perps are
+        # simply never seen, which is why Bybit kept dropping out of the pool.
+        cands, cursor = [], ""
+        for _ in range(8):
+            u = f"https://api.bybit.com/v5/market/instruments-info?category={cat}&limit=1000"
+            if cursor:
+                u += f"&cursor={cursor}"
+            j = await _gj(client, u)
+            res = (j or {}).get("result") or {}
+            rows = res.get("list") or []
+            cands += [x.get("symbol", "") for x in rows]
+            cursor = res.get("nextPageCursor") or ""
+            if not cursor or not rows:
+                break
         _SYM[name] = _pick([s for s in cands if "PLTR" in s.upper()]) or False
     if not _SYM[name]:
         return None
@@ -222,6 +235,127 @@ async def _gate_spot(client):
             "pct24h": _f(t.get("change_percentage")), "vol24h": _f(t.get("base_volume"))}
 
 
+# ============================================================ TABLE-DRIVEN VENUES
+# Most exchanges expose "all tickers" in one call. Rather than hand-rolling a
+# function each, describe the shape once and let a generic reader do the work —
+# adding a venue is then a single row, and a venue that changes its JSON fails
+# closed (returns None) instead of taking the pool down.
+def _dig(j, path):
+    for k in path:
+        if j is None:
+            return None
+        j = j.get(k) if isinstance(j, dict) else None
+    return j
+
+
+async def _table(client, name, url, path, sym, last, mark=None, bid=None, ask=None,
+                 pct=None, vol=None, kind="perp", pct_mult=1.0, post=None):
+    """Read one 'all tickers' endpoint and pull out the PLTR row."""
+    if post is None:
+        j = await _gj(client, url)
+    else:
+        try:
+            r = await client.post(url, json=post, headers=UA, timeout=8)
+            r.raise_for_status()
+            j = r.json()
+        except Exception:
+            return None
+    rows = _dig(j, path) if path else j
+    if not isinstance(rows, list):
+        return None
+    hits = [r for r in rows if isinstance(r, dict) and "PLTR" in str(r.get(sym, "")).upper()]
+    if not hits:
+        _SYM[name] = False
+        return None
+    row = _pick_row(hits, sym)
+    _SYM[name] = str(row.get(sym))
+    px = _f(row.get(last))
+    if not px:
+        return None
+    return {"name": name, "kind": kind, "symbol": str(row.get(sym)),
+            "price": px, "mark": (_f(row.get(mark)) if mark else None) or px,
+            "bid": _f(row.get(bid)) if bid else None,
+            "ask": _f(row.get(ask)) if ask else None,
+            "pct24h": (_f(row.get(pct)) or 0) * pct_mult if pct else None,
+            "vol24h": _f(row.get(vol)) if vol else None}
+
+
+def _pick_row(hits, sym):
+    for r in hits:
+        if "USDT" in str(r.get(sym, "")).upper():
+            return r
+    return hits[0]
+
+
+async def _hyperliquid(client):
+    """Hyperliquid is a POST-only info endpoint with parallel arrays."""
+    try:
+        r = await client.post("https://api.hyperliquid.xyz/info",
+                              json={"type": "metaAndAssetCtxs"}, headers=UA, timeout=8)
+        r.raise_for_status()
+        j = r.json()
+    except Exception:
+        return None
+    try:
+        universe = j[0]["universe"]; ctxs = j[1]
+    except Exception:
+        return None
+    for i, u in enumerate(universe):
+        if "PLTR" in str(u.get("name", "")).upper() and i < len(ctxs):
+            c = ctxs[i] or {}
+            px = _f(c.get("markPx")) or _f(c.get("midPx"))
+            if not px:
+                return None
+            prev = _f(c.get("prevDayPx"))
+            _SYM["hyperliquid-perp"] = u["name"]
+            return {"name": "hyperliquid-perp", "kind": "perp", "symbol": u["name"],
+                    "price": px, "mark": px, "bid": None, "ask": None,
+                    "pct24h": ((px / prev - 1) * 100) if prev else None,
+                    "vol24h": _f(c.get("dayNtlVlm"))}
+    _SYM["hyperliquid-perp"] = False
+    return None
+
+
+# name -> (url, rows-path, symbol field, last, mark, bid, ask, pct, vol, pct multiplier)
+_TABLES = {
+    "htx-perp":      ("https://api.hbdm.com/linear-swap-ex/market/detail/batch_merged", ["ticks"],
+                      "contract_code", "close", None, "bid", "ask", None, "vol", 1.0),
+    "bingx-perp":    ("https://open-api.bingx.com/openApi/swap/v2/quote/ticker", ["data"],
+                      "symbol", "lastPrice", None, "bidPrice", "askPrice", "priceChangePercent", "volume", 1.0),
+    "woox-perp":     ("https://api.woo.org/v1/public/futures", ["rows"],
+                      "symbol", "mark_price", "mark_price", None, None, None, None, 1.0),
+    "phemex-perp":   ("https://api.phemex.com/md/v3/ticker/24hr/all", ["result"],
+                      "symbol", "lastRp", "markRp", "bidRp", "askRp", None, "volumeRq", 1.0),
+    "blofin-perp":   ("https://openapi.blofin.com/api/v1/market/tickers", ["data"],
+                      "instId", "last", None, "bidPrice", "askPrice", None, "vol24h", 1.0),
+    "coinex-perp":   ("https://api.coinex.com/v2/futures/ticker", ["data"],
+                      "market", "last", "mark_price", None, None, None, "value", 1.0),
+    "xt-perp":       ("https://fapi.xt.com/future/market/v1/public/q/tickers", ["result"],
+                      "s", "c", None, None, None, "cr", "v", 100.0),
+    "bitrue-perp":   ("https://fapi.bitrue.com/fapi/v1/ticker/24hr", None,
+                      "symbol", "lastPrice", None, None, None, "priceChangePercent", "volume", 1.0),
+    "bitunix-perp":  ("https://fapi.bitunix.com/api/v1/futures/market/tickers", ["data"],
+                      "symbol", "lastPrice", "markPrice", None, None, None, "baseVol", 1.0),
+    "krakenfut-perp": ("https://futures.kraken.com/derivatives/api/v3/tickers", ["tickers"],
+                      "symbol", "last", "markPrice", "bid", "ask", None, "vol24h", 1.0),
+    "cryptocom-perp": ("https://api.crypto.com/exchange/v1/public/get-tickers", ["result", "data"],
+                      "i", "a", None, "b", "k", "c", "v", 100.0),
+    "bitmart-perp":  ("https://api-cloud-v2.bitmart.com/contract/public/details", ["data", "symbols"],
+                      "symbol", "last_price", "index_price", None, None, None, "volume_24h", 1.0),
+    "toobit-perp":   ("https://api.toobit.com/quote/v1/ticker/24hr", None,
+                      "s", "c", None, "b", "a", None, "v", 1.0),
+}
+
+
+def _mk(name):
+    cfg = _TABLES[name]
+    url, path, sym, last, mark, bid, ask, pct, vol, mult = cfg
+    async def go(client, _n=name, _u=url, _p=path, _s=sym, _l=last, _m=mark,
+                 _b=bid, _a=ask, _pc=pct, _v=vol, _mu=mult):
+        return await _table(client, _n, _u, _p, _s, _l, _m, _b, _a, _pc, _v, pct_mult=_mu)
+    return go
+
+
 PROVIDERS = [
     ("bybit-perp",  lambda c: _bybit(c, "linear", "bybit-perp")),
     ("binance-perp", _binance),
@@ -233,7 +367,8 @@ PROVIDERS = [
     ("kraken-spot",  _kraken),
     ("gate-spot",    _gate_spot),
     ("bybit-spot",  lambda c: _bybit(c, "spot", "bybit-spot")),
-]
+    ("hyperliquid-perp", _hyperliquid),
+] + [(n, _mk(n)) for n in _TABLES]
 
 
 async def probe_all(client):
@@ -261,8 +396,8 @@ async def fetch_one(client, name):
 # ============================================================ DEPTH / TAPE / KLINES
 # Order book, recent trades, and 1-minute closes from the venues that actually list PLTR.
 # Bybit/Kraken usually DON'T have it, so we prefer the perp venues.
-DEPTH_PRIORITY = ["binance-perp", "okx-swap", "bitget-perp", "gate-perp",
-                  "kucoin-perp", "mexc-perp", "gate-spot", "bybit-perp", "bybit-spot"]
+DEPTH_PRIORITY = ["binance-perp", "bybit-perp", "okx-swap", "bitget-perp", "gate-perp",
+                  "kucoin-perp", "mexc-perp"]
 
 
 def _top(bids, asks, n=25):
@@ -309,6 +444,95 @@ async def depth(client, name):
         return {"bids": b, "asks": a} if (b or a) else None
     except Exception:
         return None
+
+
+# ============================================================ SIZE NORMALISATION
+# Order-book sizes are NOT in the same unit everywhere: Binance/Bybit/Bitget and
+# the spot venues quote the base asset (PLTR), but OKX, Gate, KuCoin and MEXC
+# quote CONTRACTS. Summing those raw would produce a meaningless book, so each
+# venue's contract multiplier is resolved once and cached.
+_MULT = {}
+
+async def size_mult(client, name):
+    """PLTR per unit of whatever the venue's depth endpoint counts in."""
+    if name in _MULT:
+        return _MULT[name]
+    sym = _SYM.get(name)
+    m = 1.0
+    try:
+        if name == "okx-swap" and sym:
+            j = await _gj(client, f"https://www.okx.com/api/v5/public/instruments?instType=SWAP&instId={sym}")
+            m = _f((j.get("data") or [{}])[0].get("ctVal")) or 1.0
+        elif name == "gate-perp" and sym:
+            j = await _gj(client, f"https://api.gateio.ws/api/v4/futures/usdt/contracts/{sym}")
+            m = _f((j or {}).get("quanto_multiplier")) or 1.0
+        elif name == "kucoin-perp" and sym:
+            j = await _gj(client, f"https://api-futures.kucoin.com/api/v1/contracts/{sym}")
+            m = abs(_f(((j or {}).get("data") or {}).get("multiplier")) or 1.0) or 1.0
+        elif name == "mexc-perp" and sym:
+            j = await _gj(client, f"https://contract.mexc.com/api/v1/contract/detail?symbol={sym}")
+            d = (j or {}).get("data")
+            if isinstance(d, list):
+                d = d[0] if d else {}
+            m = _f((d or {}).get("contractSize")) or 1.0
+    except Exception:
+        m = 1.0
+    if not m or m <= 0:
+        m = 1.0
+    _MULT[name] = m
+    return m
+
+
+# Contracts only — spot books are a different instrument with different depth
+# and would distort a consolidated perp book.
+DEPTH_VENUES = ["binance-perp", "bybit-perp", "okx-swap", "bitget-perp",
+                "gate-perp", "kucoin-perp", "mexc-perp"]
+
+
+def is_perp(name: str) -> bool:
+    return not name.endswith("-spot")
+
+
+async def depth_many(client, names):
+    """Fetch several books at once, each normalised to PLTR base units.
+    Returns {venue: {'bids':[[p,base]], 'asks':[[p,base]], 'mult':m}}."""
+    use = [n for n in names if n in DEPTH_VENUES]
+    if not use:
+        return {}
+    mults = await asyncio.gather(*[size_mult(client, n) for n in use], return_exceptions=True)
+    books = await asyncio.gather(*[depth(client, n) for n in use], return_exceptions=True)
+    out = {}
+    for n, m, bk in zip(use, mults, books):
+        if not isinstance(bk, dict) or not bk:
+            continue
+        m = m if isinstance(m, (int, float)) and m > 0 else 1.0
+        out[n] = {"mult": m,
+                  "bids": [[p, sz * m] for p, sz in bk.get("bids", []) if p and sz],
+                  "asks": [[p, sz * m] for p, sz in bk.get("asks", []) if p and sz]}
+    return out
+
+
+async def tape_many(client, names, limit=60):
+    """Consolidated trade tape across venues, sizes normalised to PLTR."""
+    use = [n for n in names if n in DEPTH_VENUES]
+    if not use:
+        return []
+    mults = await asyncio.gather(*[size_mult(client, n) for n in use], return_exceptions=True)
+    tapes = await asyncio.gather(*[tape(client, n) for n in use], return_exceptions=True)
+    rows = []
+    for n, m, tp in zip(use, mults, tapes):
+        if not isinstance(tp, list):
+            continue
+        m = m if isinstance(m, (int, float)) and m > 0 else 1.0
+        for t in tp:
+            sz = (t.get("sz") or 0) * m
+            px = t.get("px")
+            if not px or not sz:
+                continue
+            rows.append({"px": px, "sz": sz, "usd": px * sz, "side": t.get("side"),
+                         "ts": t.get("ts"), "venue": n, "block": t.get("block", False)})
+    rows.sort(key=lambda r: r.get("ts") or 0, reverse=True)
+    return rows[:limit]
 
 
 async def tape(client, name):

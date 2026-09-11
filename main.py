@@ -232,27 +232,110 @@ def _shape_crypto(sym, source, *, ti_last, pct, high, low, vol, turnover,
     }
 
 
+BOOK_TICK = float(os.getenv("BOOK_TICK", "0.01"))        # consolidation price bucket
+BOOK_MAX_DEV = float(os.getenv("BOOK_MAX_DEV", "0.35"))   # max % a venue mid may sit from consensus
+
+
+def consolidate_books(books: dict) -> dict:
+    """Merge per-venue books into ONE cumulative book.
+
+    Sizes arrive already normalised to PLTR base units (exchanges.depth_many
+    applies each venue's contract multiplier: OKX quotes 1 PLTR per contract,
+    Gate/KuCoin/MEXC 0.01). Levels are bucketed onto a common tick — bids
+    rounded DOWN, asks rounded UP — so aggregation never invents a better price
+    than a venue actually showed.
+
+    Two guards matter here:
+      * a venue whose mid sits far from the consensus is left out of the book
+        (it is a different market at that moment, and merging it manufactures
+        enormous fake crossing);
+      * the merged book is then explicitly UNCROSSED by retiring whichever side
+        of a crossing pair is smaller, so the ladder can never show a bid at or
+        above the best ask.
+    """
+    if not books:
+        return {}
+    # ---- 1. keep only venues trading near the consensus mid
+    mids = {}
+    for n, bk in books.items():
+        b, a = bk.get("bids") or [], bk.get("asks") or []
+        if b and a:
+            mids[n] = (max(p for p, _ in b) + min(p for p, _ in a)) / 2
+    if not mids:
+        return {}
+    ref = sorted(mids.values())[len(mids) // 2]
+    far = {}
+    use = {}
+    for n, bk in books.items():
+        m = mids.get(n)
+        if m is None:
+            continue
+        off = abs(m / ref - 1) * 100
+        if off <= BOOK_MAX_DEV:
+            use[n] = bk
+        else:
+            far[n] = f"mid {m:.2f} ({off:+.2f}% vs {ref:.2f})"
+    if not use:
+        return {}
+
+    # ---- 2. bucket onto a common tick and sum
+    bid_lv, ask_lv, per_venue = {}, {}, {}
+    for name, bk in use.items():
+        vb = va = 0.0
+        for p, sz in bk.get("bids") or []:
+            k = round(math.floor(p / BOOK_TICK) * BOOK_TICK, 4)
+            bid_lv[k] = bid_lv.get(k, 0.0) + sz; vb += sz
+        for p, sz in bk.get("asks") or []:
+            k = round(math.ceil(p / BOOK_TICK) * BOOK_TICK, 4)
+            ask_lv[k] = ask_lv.get(k, 0.0) + sz; va += sz
+        per_venue[name] = {"bidVol": round(vb, 2), "askVol": round(va, 2),
+                           "mult": bk.get("mult", 1.0), "mid": round(mids[name], 2)}
+    if not bid_lv or not ask_lv:
+        return {}
+    gross = sum(bid_lv.values()) + sum(ask_lv.values())
+
+    # ---- 3. uncross: retire the smaller side of each crossing pair
+    bids = sorted(([k, v] for k, v in bid_lv.items()), key=lambda x: -x[0])
+    asks = sorted(([k, v] for k, v in ask_lv.items()), key=lambda x: x[0])
+    crossed = 0.0
+    while bids and asks and bids[0][0] >= asks[0][0]:
+        if bids[0][1] <= asks[0][1]:
+            crossed += bids.pop(0)[1]
+        else:
+            crossed += asks.pop(0)[1]
+    if not bids or not asks:
+        return {}
+    return {"bids": [[p, round(v, 2)] for p, v in bids[:25]],
+            "asks": [[p, round(v, 2)] for p, v in asks[:25]],
+            "perVenue": per_venue, "farVenues": far,
+            "crossedPct": round(min(crossed / gross * 100, 100.0), 2) if gross else 0.0}
+
+
 async def poll_depth():
-    """Order book + trade tape from the best PLTR venue in the pool (Binance/OKX/Gate/Bitget/…)."""
-    name = STATE["meta"].get("depthVenue")
-    if not name:
-        name = await ex.resolve_depth(_client, _ROT["live"])
-        STATE["meta"]["depthVenue"] = name
-    if not name:
-        async with _LOCK:
-            STATE["meta"]["errors"]["depth"] = "no PLTR order-book venue in the pool"
-        recompute_signal(); return
-    book = await ex.depth(_client, name)
-    trades = await ex.tape(_client, name)
-    if not book:
-        async with _LOCK:
-            STATE["meta"]["errors"]["depth"] = f"no order book from {name}"
-        recompute_signal(); return
-    bids, asks = book["bids"], book["asks"]
+    """ONE cumulative order book and tape, merged across every venue in the pool."""
+    pool = list(_ROT["live"]) or []
+    books = await ex.depth_many(_client, pool)
+    trades = await ex.tape_many(_client, pool, limit=60)
+    con = consolidate_books(books)
+    if not con:
+        # fall back to the single best venue rather than showing nothing
+        name = STATE["meta"].get("depthVenue") or await ex.resolve_depth(_client, pool)
+        book = await ex.depth(_client, name) if name else None
+        if not book:
+            async with _LOCK:
+                STATE["meta"]["errors"]["depth"] = "no PLTR order book from any pool venue"
+            recompute_signal(); return
+        con = {"bids": book["bids"], "asks": book["asks"],
+               "perVenue": {name: {"levels": len(book["bids"]) + len(book["asks"])}}, "crossedPct": 0.0}
+        sources = [name]
+    else:
+        sources = sorted(con["perVenue"], key=lambda n: -(con["perVenue"][n]["bidVol"]
+                                                          + con["perVenue"][n]["askVol"]))
+    bids, asks = con["bids"], con["asks"]
     bidvol = sum(s for _, s in bids); askvol = sum(s for _, s in asks)
     imb = ((bidvol - askvol) / (bidvol + askvol) * 100) if (bidvol + askvol) else 0.0
-    buy_usd = sum(t["usd"] for t in trades if t["side"] == "buy")
-    sell_usd = sum(t["usd"] for t in trades if t["side"] == "sell")
+    buy_usd = sum(t["usd"] for t in trades if t.get("side") == "buy")
+    sell_usd = sum(t["usd"] for t in trades if t.get("side") == "sell")
     tot = buy_usd + sell_usd
     buy_pct = round(buy_usd / tot * 100) if tot else 50
     large = [t for t in trades if t["usd"] >= CFG["LARGE_TRADE_USD"]][:12]
@@ -263,10 +346,55 @@ async def poll_depth():
                   "imbalance": imb, "tape": trades[:40], "large": large,
                   "buyPct": buy_pct, "sellPct": 100 - buy_pct, "spread": spread,
                   "spreadPct": (spread / asks[0][0] * 100) if (asks and asks[0][0]) else 0.0,
-                  "depthSource": name})
+                  "depthSource": ("consolidated · %d venue%s" % (len(sources), "" if len(sources) == 1 else "s")),
+                  "depthVenues": sources, "bookPerVenue": con.get("perVenue", {}),
+                  "bookCrossedPct": con.get("crossedPct", 0.0), "bookTick": BOOK_TICK,
+                  "bookFarVenues": con.get("farVenues", {})})
         STATE["meta"]["cryptoAsOf"] = now_iso()
+        STATE["meta"]["depthVenues"] = sources
         STATE["meta"]["errors"].pop("depth", None); STATE["meta"]["errors"].pop("crypto", None)
     recompute_signal()
+
+
+PRICE_TOLERANCE = float(os.getenv("PRICE_TOLERANCE", "3.0"))   # percent
+
+
+async def screen_pool():
+    """Drop venues that quote a price far from the pool consensus.
+
+    Not every contract with PLTR in its name is the same instrument — some are
+    leveraged or structured products, and at least one venue serves a stale
+    field. A single outlier in the rotation makes the headline price jump every
+    Nth second and corrupts the basis, so the pool is screened on the median."""
+    live = list(_ROT["live"])
+    if len(live) < 3:
+        return
+    got = await asyncio.gather(*[ex.fetch_one(_client, n) for n in live],
+                               return_exceptions=True)
+    px = {}
+    for n, t in zip(live, got):
+        if isinstance(t, dict) and t.get("price"):
+            px[n] = float(t["price"])
+    if len(px) < 3:
+        return
+    med = sorted(px.values())[len(px) // 2]
+    keep, dropped = [], {}
+    for n in live:
+        v = px.get(n)
+        if v is None:                      # transient failure — keep it in the pool
+            keep.append(n); continue
+        off = abs(v / med - 1) * 100
+        if off <= PRICE_TOLERANCE:
+            keep.append(n)
+        else:
+            dropped[n] = f"{v:.2f} ({off:+.1f}% vs pool median {med:.2f})"
+    async with _LOCK:
+        _ROT["live"] = keep
+        STATE["meta"]["exchanges"] = keep
+        STATE["meta"]["excluded"] = dropped
+        STATE["meta"]["poolMedian"] = round(med, 2)
+        for n in dropped:
+            STATE["crypto"].get("exchanges", {}).pop(n, None)
 
 
 async def rotate_price():
@@ -280,6 +408,13 @@ async def rotate_price():
     if not t or not t.get("price"):
         return
     mark = t.get("mark") or t["price"]
+    # second line of defence: never let one tick move the headline price by more
+    # than the tolerance away from where the pool already is
+    ref = STATE["meta"].get("poolMedian") or STATE["crypto"].get("mark")
+    if ref and abs(mark / ref - 1) * 100 > max(PRICE_TOLERANCE, 5.0):
+        async with _LOCK:
+            STATE["meta"].setdefault("excluded", {})[name] = f"{mark:.2f} outlier tick"
+        return
     async with _LOCK:
         c = STATE["crypto"]
         c.setdefault("exchanges", {})[name] = {"price": t["price"], "mark": mark,
@@ -917,8 +1052,16 @@ async def lifespan(app: FastAPI):
     global _client
     _client = httpx.AsyncClient(follow_redirects=True)
     STATE["meta"]["started"] = now_iso()
-    _ROT["live"] = await ex.probe_all(_client)          # which of the ~10 exchanges list PLTR
+    pool = await ex.probe_all(_client)                  # which venues list PLTR at all
+    # perpetual contracts only — spot is a separate instrument with its own depth
+    if os.getenv("PERP_ONLY", "1") == "1":
+        skipped = [n for n in pool if not ex.is_perp(n)]
+        pool = [n for n in pool if ex.is_perp(n)]
+        if skipped:
+            STATE["meta"]["spotSkipped"] = skipped
+    _ROT["live"] = pool
     STATE["meta"]["exchanges"] = _ROT["live"]
+    await screen_pool()                                  # drop venues quoting a different instrument
     STATE["meta"]["depthVenue"] = await ex.resolve_depth(_client, _ROT["live"])  # order book / tape source
     await seed_live()                                    # prefill 1–15M timeframe buffer
     # load a cached backtest if present, so the tab is populated instantly
@@ -948,6 +1091,7 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(loop(poll_amd, float(os.getenv("AMD_INTERVAL", "60")), "amd")),
         asyncio.create_task(loop(poll_filings, CFG["FILINGS_INTERVAL"], "filings")),
         asyncio.create_task(loop(run_backtest_job, bt_interval, "backtest")),
+        asyncio.create_task(loop(screen_pool, float(os.getenv("SCREEN_INTERVAL", "900")), "screen")),
     ]
     try:
         yield
@@ -970,6 +1114,27 @@ async def api_state():
 async def api_amd():
     async with _LOCK:
         return JSONResponse(json.loads(json.dumps(AMD, default=str)))
+
+
+@app.get("/api/venues")
+async def api_venues():
+    """Probe every configured venue and report which ones actually list PLTR.
+    Diagnostic — tells you at a glance who dropped out and why."""
+    out = []
+    for name, fn in ex.PROVIDERS:
+        try:
+            r = await fn(_client)
+        except Exception as e:
+            out.append({"venue": name, "live": False, "error": str(e)[:90]}); continue
+        if r and r.get("price"):
+            out.append({"venue": name, "live": True, "symbol": r.get("symbol"),
+                        "price": r.get("price"), "kind": r.get("kind")})
+        else:
+            out.append({"venue": name, "live": False, "symbol": ex._SYM.get(name)})
+    live = [o for o in out if o["live"]]
+    return JSONResponse({"configured": len(out), "live": len(live),
+                         "pool": STATE["meta"].get("exchanges"),
+                         "depthVenue": STATE["meta"].get("depthVenue"), "venues": out})
 
 
 @app.get("/api/filings")
