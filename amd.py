@@ -19,8 +19,15 @@ correct across US daylight-saving changes:
   London  07:00 -> NY open
   NY      NY open -> +6h30m
 """
+import os
 import datetime as dt
 from zoneinfo import ZoneInfo
+
+# A 181-day walk-forward replay showed the original stop placement (entry = Asia
+# edge, stop = sweep extreme) produced a MEDIAN risk of 0.106% — narrower than
+# the spread plus noise. Result: 13.9% hit rate over 137 trades, -200R. Floor the
+# stop and it moves to roughly breakeven. Not an edge, but no longer a shredder.
+MIN_STOP_PCT = float(os.getenv("AMD_MIN_STOP_PCT", "0.5"))
 
 NY = ZoneInfo("America/New_York")
 ASIA_START_H, ASIA_END_H = 0, 7
@@ -132,13 +139,22 @@ def compute(candles, venue=None, symbol=None, now_ms=None):
         else:
             entry, stop = asia_high, sweep_px
             t1, t2 = asia_low, asia_low - rng
+        # floor the stop so a fast reclaim cannot collapse entry onto stop
+        raw_stop = stop
+        need = entry * MIN_STOP_PCT / 100
+        if abs(entry - stop) < need:
+            stop = entry - need if bias == "bullish" else entry + need
         risk = abs(entry - stop)
         levels = {"side": "long" if bias == "bullish" else "short",
                   "entry": round(entry, 2), "stop": round(stop, 2),
                   "t1": round(t1, 2), "t2": round(t2, 2),
                   "risk": round(risk, 2),
                   "rr1": round(abs(t1 - entry) / risk, 2) if risk else None,
-                  "rr2": round(abs(t2 - entry) / risk, 2) if risk else None}
+                  "rr2": round(abs(t2 - entry) / risk, 2) if risk else None,
+                  "riskPct": round(risk / entry * 100, 3) if entry else None,
+                  "stopRaw": round(raw_stop, 2),
+                  "stopWidened": abs(raw_stop - stop) > 1e-9,
+                  "minStopPct": MIN_STOP_PCT}
 
     # ---- has NY actually expanded? ----
     expanded = False

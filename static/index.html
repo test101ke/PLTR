@@ -146,9 +146,9 @@ h1,h2,h3{margin:0;font-weight:600;letter-spacing:-.02em}
 .tfstrip .lbl{display:none}
 .tf{background:var(--fill);border-radius:var(--r-md);padding:9px 6px;text-align:center;min-width:0}
 .tf .t{font-size:10.5px;color:var(--ink-3);font-weight:590}
-.tf .w{font-size:12.5px;font-weight:640;margin-top:2px;letter-spacing:-.02em}
+.tf .w{font-size:12.5px;font-weight:640;margin-top:2px;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
 .tf .r{font-size:10.5px;color:var(--ink-3);margin-top:1px}
-.tf.buy .w{color:var(--up)}.tf.sell .w{color:var(--down)}.tf.side .w{color:var(--flat)}.tf.na .w{color:var(--ink-3)}
+.tf.up .w{color:var(--up)}.tf.down .w{color:var(--down)}.tf.side .w{color:var(--ink-3)}.tf.na .w{color:var(--ink-3)}
 .factors{display:flex;flex-direction:column;border-radius:var(--r-md);overflow:hidden;background:var(--fill)}
 .factor{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 13px;position:relative}
 .factor+.factor::before{content:"";position:absolute;left:13px;right:0;top:0;height:.5px;background:var(--line-2)}
@@ -425,7 +425,8 @@ h1,h2,h3{margin:0;font-weight:600;letter-spacing:-.02em}
         <div class="lab"><span>Conviction<button class="ib" type="button" data-i="conviction" aria-label="What is this?" aria-expanded="false">i</button></span><span id="confVal">—</span></div></div>
     </div>
     <div>
-      <div class="tfstrip" id="tfStrip" aria-label="Short-term timeframe signals"></div>
+      <div class="blab" style="margin-bottom:6px">Recent move<button class="ib" type="button" data-i="timeframes" aria-label="What is this?" aria-expanded="false">i</button></div>
+      <div class="tfstrip" id="tfStrip" aria-label="Price move over the last 1 to 15 minutes"></div>
       <details class="mini" id="whyFold">
         <summary>What's driving it<button class="ib" type="button" data-i="factors" aria-label="What is this?" aria-expanded="false">i</button></summary>
         <div class="factors" id="factors"></div>
@@ -613,7 +614,7 @@ if("serviceWorker" in navigator&&location.protocol!=="file:"){
 const GLOSSARY={
  composite:["Composite signal","One call — <b>STRONG BUY</b>, <b>SIDEWAYS</b> or <b>STRONG SELL</b> — blended from every indicator below: the real stock's trend, momentum, tokenized order flow, the basis, valuation, AI-scored news and the AMD session read. Each contributes a weighted vote; the sum decides the word.","It is a summary, not an instruction. Check which indicators disagree before acting."],
  conviction:["Conviction","How strongly the indicators agree, 0–100%. High conviction means most of them point the same way; low conviction means they are fighting each other, which usually means chop.",""],
- timeframes:["Short-term signals (1M–15M)","The same call recomputed over the last 1, 3, 5, 10 and 15 minutes of live tick data, then nudged by the bigger picture (price vs the 50- and 200-day moving averages). When all five line up, the move has follow-through; when they split, it's noise.",""],
+ timeframes:["Recent move (1M–15M)","How far price has moved over the last 1, 3, 5, 10 and 15 minutes, and whether that move is <b>quiet</b>, <b>normal</b>, <b>stretched</b> or <b>extreme</b> against the typical move over the same window in the last hour. Context, not a call.","These used to show BUY/SELL. A 181-day walk-forward replay found following that rule lost 700–930% cumulative after fees at every horizon, and fading it lost too — so the verdict was removed rather than left on screen."],
  factors:["Indicators driving the call","Every input the composite used, with its direction (▲ bullish, ▼ bearish, → neutral) and the number behind it. <b>Trend</b> = price vs moving averages. <b>Momentum</b> = RSI. <b>Order flow</b> = live book and tape pressure. <b>Basis</b> = tokenized vs real price gap. <b>Valuation</b> = P/E. <b>News</b> = AI sentiment. <b>AMD</b> = the session model.",""],
  tokenized:["Tokenized PLTR (PLTRX)","Palantir stock itself only trades on NASDAQ, which has no public order book and closes at night. Crypto venues list a <b>tokenized</b> PLTR contract that trades nearly 24/5 — that is the only PLTR market with a visible order book, a trade tape, and Asia/London sessions, so it is what powers this panel.","It is a separate, thinner market. It tracks NASDAQ but can drift, especially outside US hours."],
  book:["Order book (cumulative)","Every venue in the pool merged into <b>one</b> book, not a single exchange. Prices are bucketed onto a common tick — bids rounded down, asks rounded up — so the merge never invents a better price than a venue actually showed. Sizes are converted to PLTR first: OKX, Gate, KuCoin and MEXC quote in <b>contracts</b>, so each is multiplied by its contract size before being added. Switch <b>PLTR ⇄ USDT</b> to read the depth as share counts or dollar value.","Venues sometimes disagree by a cent, which makes the merged book cross. That is real arbitrage; anything through the mid is trimmed and reported rather than hidden."],
@@ -756,7 +757,7 @@ function factorKey(name){const n=(name||"").toLowerCase();
   if(n.startsWith("valuation"))return"valuationF"; if(n.startsWith("news"))return"sentiment";
   if(n.startsWith("amd"))return"amd"; return"";}
   const tfs=sig.timeframes||[];
-  $("#tfStrip").innerHTML=(tfs.length?tfs.map(t=>`<div class="tf ${t.cls}"><div class="t">${t.tf}</div><div class="w">${t.word}</div><div class="r">${t.ret!=null?(t.ret>=0?"+":"")+t.ret+"%":"warming"}</div></div>`).join(""):`<span class="muted" style="font-size:12px">warming up — 1–15M signals appear as live prices stream in</span>`);
+  $("#tfStrip").innerHTML=(tfs.length?tfs.map(t=>`<div class="tf ${t.cls}"><div class="t">${t.tf}</div><div class="w">${t.word}</div><div class="r">${esc(t.note||"")}</div></div>`).join(""):`<span class="muted" style="font-size:12px">warming up — 1–15M signals appear as live prices stream in</span>`);
 
   // ---- live market ----
   $("#mktSource").textContent=(meta.exchanges&&meta.exchanges.length?`${meta.exchanges.length} perp venues`:(c.priceSource||"—"));
@@ -931,6 +932,7 @@ function renderAmd(a){
     ["Asia low",money(a.asiaLow),"range bottom","flat"],
     ["Range size",money(a.range),"","flat"],
     ...(a.swept?[[`Sweep (${a.swept})`,money(a.sweepPx),a.reclaimed?"reclaimed":"not reclaimed",a.reclaimed?"up":"down"]]:[]),
+    ...(lv&&lv.riskPct!=null?[["Risk",lv.riskPct+"%",lv.stopWidened?`widened to ${lv.minStopPct}% floor`:"as measured",lv.stopWidened?"flat":""]]:[]),
     ...(lv?[["Entry",money(lv.entry),lv.side,lv.side==="long"?"up":"down"],
            ["Invalidation",money(lv.stop),"risk "+money(lv.risk),"down"],
            ["Target 1",money(lv.t1),(lv.rr1!=null?lv.rr1+"R":""),"up"],

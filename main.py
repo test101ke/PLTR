@@ -39,6 +39,7 @@ import amd as amdlib
 import newsfeed
 import google_news
 import filings as filinglib
+import signal_log
 
 # ---------------------------------------------------------------- config
 CFG = {
@@ -469,41 +470,42 @@ def _price_ago(seconds):
 
 
 def compute_timeframes(stock):
+    """Describe what price has DONE over 1-15 minutes. Deliberately not a call.
+
+    A 181-day walk-forward replay killed the old momentum verdict: following it
+    cost -700% to -930% cumulative after fees at every horizon, and FADING it
+    lost too once fees were charged (tested at 1x, 2x and 4x the trigger, split
+    walk-forward — every variant negative, p<=0.04). There is no edge here in
+    either direction, so the tiles now report the move and how unusual it is,
+    and leave the decision alone.
+    """
     now_px = _LIVE[-1][1] if _LIVE else STATE["crypto"].get("mark")
     if not now_px:
         return []
-    bias = 0.0  # larger-timeframe awareness from the real NASDAQ stock
-    if stock.get("price") and stock.get("dma50") and stock.get("dma200"):
-        p, d50, d200 = stock["price"], stock["dma50"], stock["dma200"]
-        if p > d50 > d200:
-            bias = 1.0
-        elif p < d50 < d200:
-            bias = -1.0
-        elif p > d200:
-            bias = 0.5
-        elif p < d200:
-            bias = -0.5
     out = []
     for tf in (1, 3, 5, 10, 15):
         past = _price_ago(tf * 60)
         if not past:
-            out.append({"tf": f"{tf}M", "word": "…", "cls": "na", "ret": None})
+            out.append({"tf": f"{tf}M", "word": "…", "cls": "na", "ret": None, "note": ""})
             continue
         r = (now_px / past - 1) * 100
-        k = math.sqrt(tf)
-        radj = r + bias * 0.06 * k
-        buy, strong = 0.12 * k, 0.40 * k
-        if radj >= strong:
-            w, cl = "STRONG BUY", "buy"
-        elif radj >= buy:
-            w, cl = "BUY", "buy"
-        elif radj <= -strong:
-            w, cl = "STRONG SELL", "sell"
-        elif radj <= -buy:
-            w, cl = "SELL", "sell"
+        # how big is this move against the last hour of moves over the SAME window?
+        sample = []
+        for back in range(tf * 60, min(3600, len(_LIVE) * 1), tf * 60):
+            a = _price_ago(back + tf * 60)
+            b = _price_ago(back)
+            if a and b:
+                sample.append(abs((b / a - 1) * 100))
+        typical = (sorted(sample)[len(sample) // 2] if sample else None)
+        if typical and typical > 0:
+            mult = abs(r) / typical
+            note = ("extreme" if mult >= 3 else "stretched" if mult >= 2
+                    else "normal" if mult >= 0.5 else "quiet")
         else:
-            w, cl = "NEUTRAL", "side"
-        out.append({"tf": f"{tf}M", "word": w, "cls": cl, "ret": round(r, 2)})
+            note = ""
+        out.append({"tf": f"{tf}M", "ret": round(r, 3), "note": note,
+                    "word": f"{'+' if r >= 0 else ''}{round(r, 2)}%",
+                    "cls": "up" if r > 0 else "down" if r < 0 else "side"})
     return out
 
 
@@ -799,6 +801,20 @@ async def poll_amd():
                         ("ok", "phase", "phaseLabel", "bias", "swept", "reclaimed",
                          "expanded", "status", "asiaHigh", "asiaLow", "levels", "venue", "symbol")}
         STATE["meta"]["amdAsOf"] = now_iso()
+    try:
+        lv = res.get("levels") or {}
+        signal_log.log_signal("amd", {
+            "day": res.get("day"), "phase": res.get("phase"), "bias": res.get("bias"),
+            "swept": res.get("swept"), "reclaimed": res.get("reclaimed"),
+            "asiaHigh": res.get("asiaHigh"), "asiaLow": res.get("asiaLow"),
+            "entry": lv.get("entry"), "stop": lv.get("stop"),
+            "t1": lv.get("t1"), "t2": lv.get("t2"),
+            "riskPct": (round(abs(lv["entry"] - lv["stop"]) / lv["entry"] * 100, 3)
+                        if lv.get("entry") and lv.get("stop") else None),
+            "venue": res.get("venue"), "symbol": res.get("symbol"),
+        }, fingerprint=f"{res.get('day')}|{res.get('bias')}|{lv.get('entry')}|{lv.get('stop')}")
+    except Exception:
+        pass
         STATE["meta"]["errors"].pop("amd", None)
     recompute_signal()
 
@@ -1032,6 +1048,19 @@ def recompute_signal():
             "bear": round(lo, 2), "base": round(px, 2), "bull": round(hi, 2)}
     # per-timeframe short-term signals (1/3/5/10/15M), aware of the larger trend
     STATE["signal"]["timeframes"] = compute_timeframes(s)
+    # record the call so it can be scored later — the desk used to overwrite this
+    # every second and keep no history, which made the headline signal untestable
+    try:
+        sig = STATE["signal"]
+        signal_log.log_signal("composite", {
+            "call": sig.get("word"), "conviction": sig.get("conf"),
+            "stockPx": s.get("price"), "tokenPx": STATE["crypto"].get("mark"),
+            "basis": sig.get("basis"), "phase": s.get("marketPhase"),
+            "factors": sig.get("factors"),
+            "timeframes": [(t.get("tf"), t.get("word")) for t in (sig.get("timeframes") or [])],
+        }, fingerprint=f"{sig.get('word')}|{round((sig.get('conf') or 0)/5)*5}")
+    except Exception:
+        pass
     if basis is not None:
         STATE["signal"]["basis"] = round(basis, 2)
 
@@ -1114,6 +1143,12 @@ async def api_state():
 async def api_amd():
     async with _LOCK:
         return JSONResponse(json.loads(json.dumps(AMD, default=str)))
+
+
+@app.get("/api/log")
+async def api_log():
+    """What the desk actually called, and how it resolved. Append-only."""
+    return JSONResponse(signal_log.read_all())
 
 
 @app.get("/api/venues")
