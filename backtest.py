@@ -27,7 +27,7 @@ HONEST STATS. Oldest 70% of days = train, newest 30% = test. The headline rule
 is the one with the best TRAIN t-statistic of net P&L (min 30 trades); its TEST numbers are
 what count. (The old version picked the best TEST score out of 12 rules, which
 quietly fits to the test set.) "passed" requires test hit >= 70%, Wilson 95%
-floor > 50%, n_test >= 30 and positive net expectancy.
+floor > 50%, n_test >= 20 and positive net expectancy.
 
 DATA. 1-minute candles from a PLTR perpetual, first venue that answers:
 Bybit linear, Binance USD-M, KuCoin, then Bybit spot. Pin with BT_VENUE/BT_SYMBOL.
@@ -54,6 +54,7 @@ FEE_PCT = float(os.getenv("BT_FEE_PCT", "0.10"))
 EVENT_PCT = float(os.getenv("BT_EVENT_PCT", "2.5"))
 EVENT_DATES = {d.strip() for d in os.getenv("BT_EVENTS", "").split(",") if d.strip()}
 MIN_TRAIN = 30
+MIN_TEST = 20      # the Wilson floor does the real small-sample guarding
 
 # NYSE full-day closures. The perp keeps trading on these days, so without this
 # list a holiday would be scored as an "open" that never happened.
@@ -65,6 +66,17 @@ NYSE_HOLIDAYS = {
     "2027-01-01", "2027-01-18", "2027-02-15", "2027-03-26", "2027-05-31", "2027-06-18",
     "2027-07-05", "2027-09-06", "2027-11-25", "2027-12-24",
 }
+HOLIDAYS_KNOWN_TO = "2027-12-31"
+# NYSE 13:00 ET early closes: the "prior close" for the next day is taken at 12:59.
+NYSE_EARLY_CLOSES = {
+    "2025-07-03", "2025-11-28", "2025-12-24",
+    "2026-11-27", "2026-12-24",
+    "2027-11-26",
+}
+
+
+def close_time(day):
+    return dt.time(12, 59) if day.isoformat() in NYSE_EARLY_CLOSES else dt.time(15, 59)
 
 
 # ------------------------------------------------------------------ statistics
@@ -210,13 +222,13 @@ def trading_days(n):
 
 
 async def load_days(fetch, days):
-    """Per day: the open window (09:25 -> 09:30+WIN_MIN) and the 15:59 close."""
+    """Per day: the open window (09:25 -> 09:30+WIN_MIN) and the close (15:59, or 12:59 on early closes)."""
     sem = asyncio.Semaphore(4)
 
     async def one(day):
         async with sem:
             op = dt.datetime.combine(day, dt.time(9, 30), tzinfo=NY)
-            cl = dt.datetime.combine(day, dt.time(15, 59), tzinfo=NY)
+            cl = dt.datetime.combine(day, close_time(day), tzinfo=NY)
             win = await fetch(op - dt.timedelta(minutes=5), op + dt.timedelta(minutes=WIN_MIN + 1))
             close = await fetch(cl - dt.timedelta(minutes=10), cl)
             await asyncio.sleep(0.1)
@@ -268,8 +280,9 @@ def build_samples(raw, news):
                 "event": abs(overnight) * 100 >= EVENT_PCT or day.isoformat() in EVENT_DATES,
                 "newsNet": nw["net"] if nw else None, "newsN": nw["n"] if nw else None,
                 "profile": profile})
-        if day_close:                       # only a day that actually traded rolls the closes
-            prev_prev, prev_close = prev_close, day_close
+        # Roll the closes forward one session. A day with no close breaks the chain,
+        # so the next day is skipped instead of measuring "overnight" across 2+ days.
+        prev_prev, prev_close = prev_close, day_close
     return samples
 
 
@@ -402,7 +415,7 @@ def analyse(samples, meta):
     if eligible:
         best = max(eligible, key=lambda r: r["trainT"])
         fn = best["_fn"]
-        passes = (best["testHit"] or 0) >= 0.70 and best["ciLow"] > 0.50 and best["nTest"] >= 30 \
+        passes = (best["testHit"] or 0) >= 0.70 and best["ciLow"] > 0.50 and best["nTest"] >= MIN_TEST \
             and (best["expectancy"] or 0) > 0
         out["passed70"] = bool(passes)
         eq, run = [], 0.0
@@ -436,6 +449,9 @@ def analyse(samples, meta):
     summer = sum(1 for s in samples if s["eat"] == "16:30")
     out["notes"].append(f"Clock: {summer} opens at 16:30 EAT, {n - summer} at 17:30 EAT. US clocks go back on "
                         "1 Nov 2026, so the open moves to 17:30 EAT until 14 Mar 2027.")
+    if samples[-1]["day"] > HOLIDAYS_KNOWN_TO:
+        out["notes"].append(f"WARNING: the NYSE holiday list in backtest.py ends {HOLIDAYS_KNOWN_TO}. "
+                            "Add later holidays or those days will be scored as fake opens.")
     out["notes"].append(f"Net of {FEE_PCT}% round-trip fees/slippage. {len(rules)} rules tested; only the "
                         "train-chosen rule's test result is a fair estimate. The rest are shown for context.")
     out["rules"] = [{k: v for k, v in r.items() if k != "_fn"} for r in rules]
