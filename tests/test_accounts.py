@@ -90,6 +90,12 @@ def test_settings_and_autostart_survive_restart():
     assert b.settings("sam") == {"leverage": 7} and b.autostart("sam") == "paper"
 
 
+def test_unwritable_data_dir_falls_back_instead_of_crashing():
+    a = ac.Accounts(data_dir="/proc/definitely-not-writable/data", env={"KEYS_SECRET": "k1"})
+    assert a.dir.endswith("logs")
+    a.register("fallback_user", "password123")        # works, no crash
+
+
 # ------------------------------------------------------------------ through the web app
 def test_app_flow_isolation_and_encryption():
     from fastapi.testclient import TestClient
