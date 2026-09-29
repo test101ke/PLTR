@@ -17,7 +17,7 @@ The frontend polls /api/state every second.
 
 Env vars (all optional except where noted):
   ANTHROPIC_API_KEY   enable the AI agent (falls back to keyword scoring if unset)
-  AI_MODEL            default "claude-3-5-haiku-latest"
+  AI_MODEL            default "claude-haiku-4-5-20251001"
   X_BEARER_TOKEN      enable X/Twitter buzz (skipped if unset)
   BYBIT_SYMBOL        override auto-discovery (e.g. "PLTRXUSDT")
   KRAKEN_PAIR         override auto-discovery (e.g. "PLTRXUSD")
@@ -30,7 +30,8 @@ Env vars (all optional except where noted):
 import os, asyncio, time, math, json, contextlib, datetime as dt
 from typing import Any, Optional
 import httpx
-from fastapi import FastAPI
+import hmac
+from fastapi import FastAPI, Request, HTTPException, Depends
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 import backtest as bt
@@ -40,11 +41,14 @@ import newsfeed
 import google_news
 import filings as filinglib
 import signal_log
+import engine as engine_mod
+import trader as trader_mod
+import anthropic
 
 # ---------------------------------------------------------------- config
 CFG = {
     "ANTHROPIC_API_KEY": os.getenv("ANTHROPIC_API_KEY", "").strip(),
-    "AI_MODEL": os.getenv("AI_MODEL", "claude-3-5-haiku-latest").strip(),
+    "AI_MODEL": os.getenv("AI_MODEL", "claude-haiku-4-5-20251001").strip(),
     "X_BEARER_TOKEN": os.getenv("X_BEARER_TOKEN", "").strip(),
     "BYBIT_SYMBOL": os.getenv("BYBIT_SYMBOL", "").strip(),
     "KRAKEN_PAIR": os.getenv("KRAKEN_PAIR", "").strip(),
@@ -72,6 +76,7 @@ STATE: dict[str, Any] = {
     "agent": {},      # AI thesis + sentiment
     "signal": {},     # composite call
     "backtest": {},   # open-window edge study
+    "plan": {},       # today's open-session plan (engine.py)
     "amd": {},        # AMD / Power-of-3 summary (full payload at /api/amd)
     "filings": {},    # congress (STOCK Act) + SEC Form 4 insider trades
 }
@@ -82,6 +87,9 @@ from collections import deque
 _LIVE = deque(maxlen=1400)   # (epoch_seconds, mark_price) for short-timeframe signals
 _ROT = {"i": 0, "live": []}  # rotating exchange price pool
 AMD = {}                     # full AMD / Power-of-3 payload (served at /api/amd)
+engine = engine_mod.Engine()
+trader = trader_mod.TradeAgent(get_ai=lambda: engine.ai)
+_AI = anthropic.AsyncAnthropic(api_key=CFG["ANTHROPIC_API_KEY"]) if CFG["ANTHROPIC_API_KEY"] else None
 _GOOGLE: list[dict] = []     # newest Google News scrape, refreshed on its own 5-min loop
 
 
@@ -693,36 +701,23 @@ async def run_google_news():
             STATE["meta"]["googleAsOf"] = now_iso()
             STATE["meta"]["googleCount"] = len(items)
             STATE["meta"]["errors"].pop("google", None)
+        newsfeed._mark("Google News", True, len(items))
     else:
         async with _LOCK:
             STATE["meta"]["errors"]["google"] = "no items returned (rate-limited or blocked)"
-
-
-def _merge_news(*pools, limit=28) -> list[dict]:
-    """Merge every source, de-duplicate on the headline, newest first."""
-    seen, out = set(), []
-    flat = [it for pool in pools for it in (pool or [])]
-    for it in sorted(flat, key=lambda x: x.get("ts") or 0, reverse=True):
-        k = newsfeed._norm(it.get("headline"))
-        if not k or k in seen:
-            continue
-        seen.add(k)
-        out.append(dict(it))
-        if len(out) >= limit:
-            break
-    return out
+        newsfeed._mark("Google News", False, err="no items (rate-limited or blocked)")
 
 
 async def fetch_news_rss() -> list[dict]:
     """Fast feeds (EDGAR, Yahoo, Nasdaq, Seeking Alpha, StockTwits) merged with the
     most recent Google News scrape. A headline shows the moment ANY source prints it."""
     try:
-        fast = await newsfeed.fetch_all(_client, limit=25)
+        fast = await newsfeed.fetch_all(_client)
     except Exception:
         fast = []
     async with _LOCK:
         goog = list(_GOOGLE)
-    merged = _merge_news(goog, fast)
+    merged = newsfeed.merge(goog + fast)
     if merged:
         return merged
     # last-ditch fallback: one plain Google News query
@@ -773,16 +768,7 @@ async def fetch_x() -> list[dict]:
         return []
 
 
-POS = ("beat","surge","soar","rally","record","upgrade","raise","bull","buy","gain","jump",
-       "contract","win","award","partnership","expand","growth","outperform","strong","高")
-NEG = ("miss","fall","drop","slide","plunge","downgrade","cut","bear","sell","loss","lawsuit",
-       "probe","warn","weak","overvalued","short","selloff","concern","decline","risk")
-
-
-def keyword_dir(text: str) -> str:
-    t = text.lower()
-    p = sum(t.count(w) for w in POS); n = sum(t.count(w) for w in NEG)
-    return "up" if p > n else "down" if n > p else "flat"
+keyword_dir = newsfeed.keyword_dir
 
 
 async def poll_amd():
@@ -836,43 +822,99 @@ async def run_backtest_job():
     days = int(os.getenv("BT_DAYS", "200"))
     res = await bt.run_backtest(days=days)
     async with _LOCK:
+        if res.get("error") and (STATE["backtest"] or {}).get("samples"):
+            # keep the last good study on screen; a failed refresh is not "no edge"
+            STATE["meta"]["errors"]["backtest"] = "refresh failed: " + res["error"]
+            return
+        STATE["meta"]["errors"].pop("backtest", None)
         STATE["backtest"] = res
+    engine.load(res)
+
+
+async def run_engine():
+    """Every second: advance today's open-session plan (fast layer)."""
+    await engine.tick(_client, STATE)
+    STATE["plan"] = engine.plan
+
+
+async def run_supervisor():
+    """Every second: call the AI supervisor if something changed or it is due."""
+    await engine.supervise(_AI, STATE)
+    STATE["plan"] = engine.plan
+
+
+_AI_VERDICTS: dict = {}     # normalized headline -> {"dir", "reason"} from the AI scorer
+
+
+def _ai_verdict(headline):
+    """AI verdicts survive re-wording: an exact match first, else the same story."""
+    k = newsfeed._norm(headline)
+    if k in _AI_VERDICTS:
+        return _AI_VERDICTS[k]
+    for kk, v in _AI_VERDICTS.items():
+        if newsfeed.same_story(kk, headline):
+            return v
+    return None
 
 
 async def run_news():
     """FAST loop: pull headlines + tweets and keyword-score them so the feed is near-live."""
     news = await fetch_news_rss()
     tweets = await fetch_x()
-    # the AI loop runs every 60s but this one every 8s — carry its verdicts across
-    # instead of overwriting them with the keyword fallback each pass
-    prior = {n.get("headline"): n for n in STATE["news"]}
     for it in news:
-        old = prior.get(it["headline"])
-        if old and old.get("aiScored"):
-            it["dir"] = old.get("dir", "flat"); it["reason"] = old.get("reason", "")
-            it["aiScored"] = True
+        v = _ai_verdict(it["headline"]) if it.get("kind", "news") == "news" else None
+        if v:
+            it["dir"], it["reason"], it["aiScored"] = v["dir"], v.get("reason", ""), True
         else:
             it["dir"] = keyword_dir(it["headline"]); it.setdefault("reason", "")
     scored_tw = [{"kind": "tweet", "src": ("@" + t["user"]) if t.get("user") else "X",
                   "headline": t["text"], "url": t.get("url", ""), "ts": t.get("ts"),
                   "dir": keyword_dir(t["text"]), "likes": t.get("likes", 0), "reason": ""} for t in tweets]
-    cu = sum(1 for x in news if x["dir"] == "up")
-    cd = sum(1 for x in news if x["dir"] == "down")
-    cf = sum(1 for x in news if x["dir"] == "flat")
+    real = [x for x in news if x.get("kind", "news") == "news"]      # social chatter is not counted
+    cu = sum(1 for x in real if x["dir"] == "up")
+    cd = sum(1 for x in real if x["dir"] == "down")
+    cf = sum(1 for x in real if x["dir"] == "flat")
+    new_keys = {newsfeed._norm(x["headline"]) for x in real} - {newsfeed._norm(x.get("headline")) for x in STATE["news"]}
     async with _LOCK:
         if news:
             STATE["news"] = news
         STATE["tweets"] = scored_tw
         ag = STATE["agent"]
         ag["xCount"] = len(tweets)
+        ag["score"] = newsfeed.score(real)
+        ag["counts"] = {"up": cu, "down": cd, "flat": cf}
         if not ag.get("aiThesis"):
-            ag["counts"] = {"up": cu, "down": cd, "flat": cf}
             ag["net"] = cu - cd
             ag["engine"] = "keyword (live)"
             ag["thesis"] = _fallback_thesis(STATE["stock"], STATE["crypto"], cu, cd)
+        STATE["meta"]["newsHealth"] = dict(newsfeed.HEALTH)
         if news:
             STATE["meta"]["newsAsOf"] = now_iso()
+    if new_keys and STATE["news"]:
+        engine.poke("news")                      # fresh headline: wake the supervisor
+    log_open_news()
     recompute_signal()
+
+
+def log_open_news():
+    """Once per session, just before 09:30 New York (16:30/17:30 EAT), record the
+    news tally since the prior close. backtest.py joins these rows by date, which
+    is the only way the open-session study can learn anything about news."""
+    now = dt.datetime.now(bt.NY)
+    if now.weekday() >= 5 or now.date().isoformat() in bt.NYSE_HOLIDAYS:
+        return
+    if not (dt.time(9, 28) <= now.time() < dt.time(9, 30)):
+        return
+    since = (now - dt.timedelta(hours=17, minutes=30)).timestamp() * 1000   # ~prior 16:00 close
+    fresh = [n for n in STATE["news"] if n.get("kind", "news") == "news" and (n.get("ts") or 0) >= since]
+    up = sum(1 for n in fresh if n.get("dir") == "up")
+    down = sum(1 for n in fresh if n.get("dir") == "down")
+    signal_log.log_signal("open_news", {
+        "nyDate": now.date().isoformat(), "n": len(fresh), "up": up, "down": down, "net": up - down,
+        "score": newsfeed.score(fresh),
+        "aiScored": sum(1 for n in fresh if n.get("aiScored")),
+        "headlines": [n.get("headline") for n in fresh[:12]],
+    }, fingerprint=now.date().isoformat())
 
 
 async def run_agent():
@@ -894,9 +936,14 @@ async def run_agent():
             if m:
                 n["dir"] = m.get("dir", n.get("dir", "flat")); n["reason"] = m.get("reason", "")
                 n["aiScored"] = True
-        cu = sum(1 for x in STATE["news"] if x.get("dir") == "up")
-        cd = sum(1 for x in STATE["news"] if x.get("dir") == "down")
-        cf = sum(1 for x in STATE["news"] if x.get("dir") == "flat")
+                _AI_VERDICTS[newsfeed._norm(n["headline"])] = {"dir": n["dir"], "reason": n["reason"]}
+        while len(_AI_VERDICTS) > 500:
+            _AI_VERDICTS.pop(next(iter(_AI_VERDICTS)))
+        real = [x for x in STATE["news"] if x.get("kind", "news") == "news"]
+        cu = sum(1 for x in real if x.get("dir") == "up")
+        cd = sum(1 for x in real if x.get("dir") == "down")
+        cf = sum(1 for x in real if x.get("dir") == "flat")
+        STATE["agent"]["score"] = newsfeed.score(real)
         ag = STATE["agent"]
         ag["thesis"] = thesis or ag.get("thesis", ""); ag["aiThesis"] = True
         ag["engine"] = "anthropic:" + CFG["AI_MODEL"]
@@ -931,13 +978,9 @@ async def ai_score(news, tweets, stock, crypto):
         '"thesis":"...","net":<integer -5..5, positive=bullish>}'
     )
     try:
-        body = {"model": CFG["AI_MODEL"], "max_tokens": 900,
-                "messages": [{"role": "user", "content": prompt}]}
-        r = await _client.post("https://api.anthropic.com/v1/messages", json=body, timeout=40,
-                               headers={"x-api-key": CFG["ANTHROPIC_API_KEY"],
-                                        "anthropic-version": "2023-06-01",
-                                        "content-type": "application/json"})
-        txt = r.json()["content"][0]["text"]
+        resp = await _AI.messages.create(model=CFG["AI_MODEL"], max_tokens=2000,
+                                         messages=[{"role": "user", "content": prompt}])
+        txt = next((b.text for b in resp.content if b.type == "text"), "")
         txt = txt[txt.find("{"): txt.rfind("}") + 1]
         parsed = json.loads(txt)
         by_i = {d["i"]: d for d in parsed.get("items", [])}
@@ -1098,6 +1141,7 @@ async def lifespan(app: FastAPI):
         p = os.path.join(HERE, "static", "backtest.json")
         if os.path.exists(p):
             STATE["backtest"] = json.load(open(p))
+            engine.load(STATE["backtest"])
     except Exception:
         pass
     # prime once, then start loops
@@ -1120,11 +1164,15 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(loop(poll_amd, float(os.getenv("AMD_INTERVAL", "60")), "amd")),
         asyncio.create_task(loop(poll_filings, CFG["FILINGS_INTERVAL"], "filings")),
         asyncio.create_task(loop(run_backtest_job, bt_interval, "backtest")),
+        asyncio.create_task(loop(run_engine, 1.0, "engine")),
+        asyncio.create_task(loop(run_supervisor, 1.0, "supervisor")),
         asyncio.create_task(loop(screen_pool, float(os.getenv("SCREEN_INTERVAL", "900")), "screen")),
     ]
     try:
         yield
     finally:
+        if trader.mode != "off":
+            await trader.stop("server shutting down")
         for t in tasks:
             t.cancel()
         await _client.aclose()
@@ -1188,6 +1236,89 @@ async def api_backtest():
 async def api_backtest_run():
     asyncio.create_task(run_backtest_job())
     return {"started": True}
+
+
+# ============================================================ TRADING (ORB, trader.py)
+def trade_guard(request: Request):
+    """Trading endpoints move money. With TRADE_TOKEN set, every call must carry it
+    in X-Trade-Token. Without it, only this machine itself may call them: the desk
+    binds 0.0.0.0, so anyone on the network could otherwise reach them."""
+    token = os.getenv("TRADE_TOKEN", "")
+    if token:
+        if not hmac.compare_digest(request.headers.get("x-trade-token", ""), token):
+            raise HTTPException(403, "trade token required")
+        return
+    host = request.client.host if request.client else ""
+    if host not in ("127.0.0.1", "::1") or request.headers.get("x-forwarded-for"):
+        raise HTTPException(403, "trading is limited to localhost; set TRADE_TOKEN to use it remotely")
+
+
+async def _body(request: Request) -> dict:
+    try:
+        return await request.json()
+    except Exception:
+        return {}
+
+
+def _fail(e: Exception):
+    code = 403 if isinstance(e, PermissionError) else 400
+    raise HTTPException(code, str(e))
+
+
+@app.get("/api/trade/status", dependencies=[Depends(trade_guard)])
+async def trade_status():
+    return JSONResponse(json.loads(json.dumps(trader.status(), default=str)))
+
+
+@app.post("/api/trade/config", dependencies=[Depends(trade_guard)])
+async def trade_config(request: Request):
+    try:
+        return {"config": trader.configure(await _body(request))}
+    except Exception as e:
+        _fail(e)
+
+
+@app.post("/api/trade/preset", dependencies=[Depends(trade_guard)])
+async def trade_preset(request: Request):
+    try:
+        return {"config": trader.apply_preset((await _body(request)).get("name", ""))}
+    except Exception as e:
+        _fail(e)
+
+
+@app.post("/api/trade/keys", dependencies=[Depends(trade_guard)])
+async def trade_keys(request: Request):
+    b = await _body(request)
+    if not (b.get("exchange") and b.get("apiKey") and b.get("secret")):
+        raise HTTPException(400, "exchange, apiKey and secret are required")
+    if trader.mode == "live":
+        raise HTTPException(400, "stop live trading before changing keys")
+    trader.keys.set(b["exchange"], b["apiKey"], b["secret"], b.get("password", ""))
+    await trader.validate_keys()
+    return {"keys": trader.keys.masked()}
+
+
+@app.delete("/api/trade/keys", dependencies=[Depends(trade_guard)])
+async def trade_keys_clear():
+    if trader.mode == "live":
+        raise HTTPException(400, "stop live trading first")
+    trader.keys.clear()
+    return {"keys": None}
+
+
+@app.post("/api/trade/start", dependencies=[Depends(trade_guard)])
+async def trade_start(request: Request):
+    b = await _body(request)
+    try:
+        return JSONResponse(json.loads(json.dumps(await trader.start(b.get("mode", "paper"), b.get("confirm", "")),
+                                                  default=str)))
+    except Exception as e:
+        _fail(e)
+
+
+@app.post("/api/trade/stop", dependencies=[Depends(trade_guard)])
+async def trade_stop():
+    return JSONResponse(json.loads(json.dumps(await trader.stop("kill switch"), default=str)))
 
 
 @app.get("/healthz")

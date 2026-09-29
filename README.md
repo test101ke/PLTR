@@ -6,10 +6,10 @@ It serves one page that live-updates every second with:
 
 - **Tokenized PLTRX** (Bybit primary, Kraken fallback): live order book, buy/sell trade tape, large-order prints, order-book imbalance, 24h volume. This is the crypto-exchange depth data — order book, tape, large orders — for the tokenized Palantir market.
 - **Real NASDAQ PLTR** (Yahoo Finance): price, 20-session chart, 52-week range, volume, 50/200-day moving averages, RSI(14), and fundamentals (P/E, market cap, beta, short interest, analyst targets) where available.
-- **AMD / Power of 3** (`amd.py`): the session model — Asia accumulates a range, London sweeps one side (manipulation), New York expands (distribution). Detects the sweep, the reclaim, the resulting bias, and derives entry / invalidation / T1 / T2 with R:R. Runs on the tokenized PLTR perp, the only PLTR market that trades through Asia and London. Served at `/api/amd`, shown in the "AMD · Power of 3" tab with a session-shaded candle chart, and folded into the composite signal as its own indicator.
+- **AMD / Power of 3** (`amd.py`): the session model — Asia accumulates a range, London sweeps one side (manipulation), New York expands (distribution). Detects the sweep, the reclaim, the resulting bias, and derives entry / invalidation / T1 / T2 with R:R. Runs on the tokenized PLTR perp, the only PLTR market that trades through Asia and London. Served at `/api/amd` only (removed from the dashboard: a 181-day replay found no edge).
 - **AI agent** (Anthropic): scores each news headline bullish/bearish/neutral, writes a short desk read, and feeds a composite **STRONG BUY / SIDEWAYS / STRONG SELL** signal with conviction and a projection band.
 - **Fast news** (`newsfeed.py`): every free real-time source polled **in parallel** and de-duplicated — SEC EDGAR filings, Yahoo Finance, Nasdaq, Seeking Alpha, Google News and StockTwits — so a headline appears the moment any one of them prints it. Default poll is every 8s. (True HFT wires — Bloomberg, Reuters, Dow Jones, Benzinga Pro — are paid commercial products with no open-source equivalent; this is the fastest free stack.) Optional X/Twitter buzz with a bearer token.
-- **Insiders & Congress** (`filings.py`): who else is trading PLTR, from public disclosures — **SEC Form 4** (officers, directors, 10%+ holders, filed within 2 business days, parsed straight from PLTR's EDGAR index at CIK 0001321655) and **STOCK Act** periodic transaction reports from US House and Senate members. Served at `/api/filings`, shown in the "Insiders & Congress" tab.
+- **Insiders & Congress** (`filings.py`): who else is trading PLTR, from public disclosures — **SEC Form 4** (officers, directors, 10%+ holders, filed within 2 business days, parsed straight from PLTR's EDGAR index at CIK 0001321655) and **STOCK Act** periodic transaction reports from US House and Senate members. Served at `/api/filings` only (removed from the dashboard).
 
 > Not financial advice. Tokenized PLTRX is a separate, thinner market that tracks — but can diverge from — the NASDAQ stock, especially outside US hours. Signals are model-derived and can be wrong.
 
@@ -74,7 +74,7 @@ pip install -r requirements.txt
 uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
-The UI is a **white one-pager** — every section (live market, overview, fundamentals, projection, open-window edge, AMD, insiders & congress) is visible on one scroll; the top tabs just jump to a section. A ◐ button toggles a dark theme.
+The UI is a one-pager built around the open trade: **Open plan** first, then market (order book and tape), news, the backtest summary and a 20-session chart. A ◐ button toggles a dark theme.
 
 ## Install it as an app
 
@@ -104,6 +104,55 @@ Three async loops keep a cached `STATE`; the page polls `/api/state` every secon
 | Insiders & Congress | 30min | SEC EDGAR Form 4 + STOCK Act datasets |
 
 The PLTRX symbol is **auto-discovered** on startup (scans Bybit/Kraken instruments for `PLTR`). Override with `BYBIT_SYMBOL` / `KRAKEN_PAIR` if needed. All tunables are env vars — see `.env.example` / `render.yaml`.
+
+## Open-session trade (16:30 EAT)
+
+The desk runs one trade: the first 15 minutes after the NASDAQ open. That is **16:30 EAT**, or **17:30 EAT** from 2 Nov 2026 to 12 Mar 2027 (US winter time). NYSE holidays and 13:00 early closes are handled.
+
+**Backtest** (`python backtest.py`, re-run daily by the desk, served at `/api/backtest`):
+- Each day records the overnight move, the prior day's change, an event flag (|overnight| >= `BT_EVENT_PCT`%, default 2.5) and the pre-open news score.
+- Rules follow or fade the first 2-minute move, the overnight move, the prior day, or news. Every trade pays `BT_FEE_PCT` (default 0.10%).
+- **Newest days count most.** Each morning the rule is re-picked from past days only, with a day `k` sessions old weighted `0.5^(k/half-life)`. The half-life (10, 20, 40, 80 sessions or equal weights) is chosen on the oldest 70% of days and judged on the newest 30%.
+- It passes only with a 70%+ test hit rate whose 95% floor is above 50%, 20+ test trades, and a profit after fees.
+
+**Live engine** (`engine.py`), two layers:
+- *Fast layer, every second:* ranks rules with the same recency weights, takes the top rule's call 2 minutes after the open, checks a price stop (`GUARD_STOP_PCT`, default 1%) every tick, records the outcome at +15 minutes and immediately re-ranks with it.
+- *AI supervisor (Claude, `SUPERVISOR_MODEL`, default `claude-opus-5-5`):* wakes 30 minutes before the open, on every new headline, after the decision and near the stop (at most every 10s, else every 60s). It can only reduce size, skip the day, move the stop within 0.3% to 1.5%, or exit early. It can never flip direction or add size. Every decision is logged to `logs/signals.jsonl`. It uses server-side refusal fallbacks (`fallbacks: "default"`). Without `ANTHROPIC_API_KEY` the fast layer runs alone.
+
+**News** (`newsfeed.py` + `google_news.py`): SEC EDGAR (set `SEC_UA` to "Your Name your@email", SEC blocks anonymous requests), Yahoo, Nasdaq, Seeking Alpha and Google News. Reworded copies of one story are folded together and count more the more outlets carry them. StockTwits is shown but never counted. The score halves every 6 hours of age. Each source's health is shown under the news feed.
+
+**Tests** (offline, no internet): `python tests/test_backtest.py`, `tests/test_engine.py`, `tests/test_news.py`, `tests/test_trader.py`.
+
+Research scripts (AMD and timeframe replays) live in `research/`.
+
+## Live trade button (ORB at the open)
+
+The **Trade** button in the top bar opens the Opening Range Breakout trader (`trader.py`). It trades the **PLTR USDT perpetual only**.
+
+- **When:** the range is the first 2 minutes after 09:30 New York (16:30 EAT; 17:30 EAT from 2 Nov to 12 Mar). Trading runs until 15 minutes after the open, then everything is closed.
+- **Entry:** a break above the range high with the order book leaning to bids goes long; a break below the low with asks leaning goes short. Each trade is a **$100 margin batch at 10x** ($1,000 of PLTR), up to 10 per session, with a 5-second wait after each exit so it never buys the top of the spike it just sold.
+- **Fees:** assumed **0.06% per side on both exchanges (0.12% round trip)**, the worst case, so results are never flattered. $1 net on $1,000 therefore needs a 0.22% move.
+- **Exits (one-tap presets in the panel, every value editable):**
+
+| Preset | First target | Then | Stop |
+|---|---|---|---|
+| Scalp | $1 net, close all | – | $1.50 incl. fees, instant |
+| **Runner** (default) | $1 net, bank 50% | trail 0.15% behind the best price | half the opening range, ignored for 3s, must hold 0.5s; break-even at +$0.60 |
+| Wick-proof | $1 net, bank 30% | trail 0.25% | full opening range, ignored for 10s, must hold 1s; break-even at +$0.50 |
+| Burst | +$0.50 arms the trail, nothing banked | trail 0.08% | half the range, ignored for 2s, must hold 0.3s; break-even at +$0.40 |
+
+  Profit is **not capped at $1**: past the first target the rest trails, so a 0.2%-a-second spike is ridden. An **emergency stop (default 1% from entry) is always on** and fires instantly, even during the grace period. At 10x a ~10% move liquidates, so trading with no stop is not offered.
+- **Speed:** re-checks the live order book (WebSocket, REST fallback) 5 to 20 times a second. Orders are capped at 20 in any one second. No minimum trade rate.
+- **Paper mode (default):** live order book, simulated fills at the touch plus slippage and fees, $700 start. **Live mode:** enter and test API keys, press **Go live**, type `LIVE`; armed for one session. **Stop & flatten** closes everything. Trading halts at a 3% daily loss.
+- **AI supervisor:** gives a direction-free market risk: `elevated` halves new batches, `halt` blocks entries and closes the position. It never opens or enlarges trades.
+- **Security:** keys stay in server memory only and are forgotten on restart (or set `EXCHANGE_ID`, `EXCHANGE_API_KEY`, `EXCHANGE_API_SECRET`). Make keys **trade-only, withdrawals off, IP-restricted**. Trade endpoints answer only to this machine unless `TRADE_TOKEN` is set.
+- Every trade (and partial exit) is logged to `logs/outcomes.jsonl` (`kind: orb_trade`).
+
+### Running the trader on Render
+- `render.yaml` pins the **Frankfurt** region: Binance and Bybit refuse US connections, and Render's default is Oregon.
+- Set **`TRADE_TOKEN`**, or the Trade panel stays locked (the server is public).
+- The **free plan sleeps** when idle, and a sleeping server misses 16:30. Use a paid always-on plan for trading.
+- Every deploy or restart forgets keys entered in the panel and stops the trader. Re-enter them, or use the `EXCHANGE_*` env vars (then set IP restrictions on the key to Render's outbound IPs).
 
 ## Endpoints
 - `/` dashboard · `/api/state` full JSON state · `/api/amd` AMD payload · `/api/filings` insiders + congress · `/api/backtest` edge study · `/healthz` health check.

@@ -1,33 +1,45 @@
 """
-PLTR Signal Desk — open-window backtest engine (multi-venue futures)
-====================================================================
-Tests the "US market open" behaviour on a PLTR crypto contract:
-at 09:30 America/New_York (16:30 EAT) the tokenized/derivative price jumps to
-catch up with the reopening NASDAQ stock, then trends. This module measures,
-over the available 1-minute history, whether a rule seen in the first ~2 minutes
-predicts the move through 09:45 ET with >=70% reliability.
+PLTR Signal Desk - open-session backtest (the 16:30 EAT trade)
+==============================================================
+Answers one question: if you only trade the US open, which simple rule would
+have made money, after fees, on days it was never fitted to?
 
-DATA SOURCE — PLTR futures/perpetuals first, spot as fallback.
-It auto-discovers a PLTR contract across venues, in order:
-  1. Bybit USDT perpetual   (category=linear)
-  2. Binance USDⓈ-M futures (fapi)
-  3. KuCoin futures
-  4. Bybit spot xStock      (category=spot)   ← fallback
-The first venue that resolves a PLTR symbol AND returns candles is used;
-the chosen "source" is reported in the output. Override with BT_VENUE /
-BT_SYMBOL if you want to pin one.
+TIMING. The NASDAQ open is 09:30 America/New_York. In Nairobi (EAT, UTC+3, no
+daylight saving) that is 16:30 while the US is on EDT (mid-March to early Nov)
+and 17:30 while the US is on EST (early Nov to mid-March). Every day is anchored
+to 09:30 New York, and each sample records the EAT clock time it fell on.
 
-HONEST STATS (unchanged): train/test split, Wilson CI, binomial p-value,
-and a "passed" flag only when the TEST hit rate >= 0.70, its 95% lower bound
-> 0.50, and n_test >= 30. Testing many rules inflates the best in-sample
-number — the out-of-sample figure is the honest one. Gross of fees/slippage;
-these contracts can be thin at the open, so paper-trade before automating.
+TRADE MODEL. Watch the first SIG_MIN minutes, decide at 09:30+SIG_MIN, exit at
+09:30+WIN_MIN. Every trade pays FEE_PCT round trip (fees + slippage).
+
+CONTEXT, per day:
+  overnight  perp move from the prior US close (15:59 ET) to 09:29 ET. This is
+             where overnight news shows up in price.
+  prevDay    prior session close-to-close ("daily change").
+  event      |overnight| >= EVENT_PCT, or the date is listed in BT_EVENTS.
+             A proxy for earnings / big-news days, since free historic news
+             with reliable timestamps does not exist.
+  news       headline tally the live desk logged just before the open
+             (logs/signals.jsonl, kind "open_news"). Empty until the desk has
+             been running through some opens; the news rule starts scoring then.
+
+HONEST STATS. Oldest 70% of days = train, newest 30% = test. The headline rule
+is the one with the best TRAIN t-statistic of net P&L (min 30 trades); its TEST numbers are
+what count. (The old version picked the best TEST score out of 12 rules, which
+quietly fits to the test set.) "passed" requires test hit >= 70%, Wilson 95%
+floor > 50%, n_test >= 20 and positive net expectancy.
+
+DATA. 1-minute candles from a PLTR perpetual, first venue that answers:
+Bybit linear, Binance USD-M, KuCoin, then Bybit spot. Pin with BT_VENUE/BT_SYMBOL.
 
 Run:  python backtest.py            (writes static/backtest.json)
+Env:  BT_DAYS=200 BT_SIGNAL_MIN=2 BT_WINDOW_MIN=15 BT_FEE_PCT=0.10
+      BT_EVENT_PCT=2.5 BT_EVENTS=2026-08-04,2026-11-03
 """
 import os, json, math, asyncio, datetime as dt
 from zoneinfo import ZoneInfo
 import httpx
+import adaptive
 try:
     import numpy as np
 except Exception:
@@ -35,11 +47,40 @@ except Exception:
 
 UA = {"User-Agent": "Mozilla/5.0 (PLTR-Signal-Desk backtest)"}
 NY = ZoneInfo("America/New_York")
+EAT = ZoneInfo("Africa/Nairobi")
 HERE = os.path.dirname(os.path.abspath(__file__))
 SIG_MIN = int(os.getenv("BT_SIGNAL_MIN", "2"))
 WIN_MIN = int(os.getenv("BT_WINDOW_MIN", "15"))
+FEE_PCT = float(os.getenv("BT_FEE_PCT", "0.10"))
+EVENT_PCT = float(os.getenv("BT_EVENT_PCT", "2.5"))
+EVENT_DATES = {d.strip() for d in os.getenv("BT_EVENTS", "").split(",") if d.strip()}
+MIN_TRAIN = 30
+MIN_TEST = 20      # the Wilson floor does the real small-sample guarding
+
+# NYSE full-day closures. The perp keeps trading on these days, so without this
+# list a holiday would be scored as an "open" that never happened.
+NYSE_HOLIDAYS = {
+    "2025-01-01", "2025-01-09", "2025-01-20", "2025-02-17", "2025-04-18", "2025-05-26",
+    "2025-06-19", "2025-07-04", "2025-09-01", "2025-11-27", "2025-12-25",
+    "2026-01-01", "2026-01-19", "2026-02-16", "2026-04-03", "2026-05-25", "2026-06-19",
+    "2026-07-03", "2026-09-07", "2026-11-26", "2026-12-25",
+    "2027-01-01", "2027-01-18", "2027-02-15", "2027-03-26", "2027-05-31", "2027-06-18",
+    "2027-07-05", "2027-09-06", "2027-11-25", "2027-12-24",
+}
+HOLIDAYS_KNOWN_TO = "2027-12-31"
+# NYSE 13:00 ET early closes: the "prior close" for the next day is taken at 12:59.
+NYSE_EARLY_CLOSES = {
+    "2025-07-03", "2025-11-28", "2025-12-24",
+    "2026-11-27", "2026-12-24",
+    "2027-11-26",
+}
 
 
+def close_time(day):
+    return dt.time(12, 59) if day.isoformat() in NYSE_EARLY_CLOSES else dt.time(15, 59)
+
+
+# ------------------------------------------------------------------ statistics
 def wilson(k, n, z=1.96):
     if n == 0:
         return (0.0, 0.0)
@@ -49,19 +90,19 @@ def wilson(k, n, z=1.96):
 
 
 def binom_p(k, n, p0=0.5):
+    """Two-sided normal approximation."""
     if n == 0:
         return 1.0
-    mu = n * p0; sd = math.sqrt(n * p0 * (1 - p0))
-    if sd == 0:
-        return 1.0
-    z = (k - mu) / sd
-    return 2 * (1 - 0.5 * (1 + math.erf(abs(z) / math.sqrt(2))))
+    sd = math.sqrt(n * p0 * (1 - p0))
+    z = (k - n * p0) / sd
+    return math.erfc(abs(z) / math.sqrt(2))
 
 
-async def _get(client, url, headers=None):
+# ------------------------------------------------------------------ data
+async def _get(client, url):
     for _ in range(3):
         try:
-            r = await client.get(url, headers=headers or UA, timeout=20)
+            r = await client.get(url, headers=UA, timeout=20)
             r.raise_for_status()
             return r.json()
         except Exception:
@@ -78,18 +119,21 @@ def _pick(cands):
     return cands[0]
 
 
-# ---------- per-venue: discover symbol + fetch 1-min klines as [ms,o,h,l,c,v] ----------
 async def bybit_disc(client, cat):
     j = await _get(client, f"https://api.bybit.com/v5/market/instruments-info?category={cat}")
     if not j or j.get("retCode") not in (0, "0", None):
         return None
     return _pick([x["symbol"] for x in j["result"]["list"] if "PLTR" in x["symbol"].upper()])
 
+
 async def bybit_kl(client, cat, sym, start, end):
-    j = await _get(client, f"https://api.bybit.com/v5/market/kline?category={cat}&symbol={sym}&interval=1&start={start}&end={end}&limit=60")
+    j = await _get(client, f"https://api.bybit.com/v5/market/kline?category={cat}&symbol={sym}"
+                           f"&interval=1&start={start}&end={end}&limit=100")
     if not j or not j.get("result", {}).get("list"):
         return []
-    return [[int(r[0]), float(r[1]), float(r[2]), float(r[3]), float(r[4]), float(r[5])] for r in j["result"]["list"]]
+    return [[int(r[0]), float(r[1]), float(r[2]), float(r[3]), float(r[4]), float(r[5])]
+            for r in j["result"]["list"]]
+
 
 async def binance_disc(client):
     j = await _get(client, "https://fapi.binance.com/fapi/v1/exchangeInfo")
@@ -98,11 +142,14 @@ async def binance_disc(client):
     return _pick([s["symbol"] for s in j.get("symbols", [])
                   if "PLTR" in s["symbol"].upper() and s.get("status") == "TRADING"])
 
+
 async def binance_kl(client, sym, start, end):
-    j = await _get(client, f"https://fapi.binance.com/fapi/v1/klines?symbol={sym}&interval=1m&startTime={start}&endTime={end}&limit=60")
+    j = await _get(client, f"https://fapi.binance.com/fapi/v1/klines?symbol={sym}&interval=1m"
+                           f"&startTime={start}&endTime={end}&limit=100")
     if not isinstance(j, list):
         return []
     return [[int(r[0]), float(r[1]), float(r[2]), float(r[3]), float(r[4]), float(r[5])] for r in j]
+
 
 async def kucoin_disc(client):
     j = await _get(client, "https://api-futures.kucoin.com/api/v1/contracts/active")
@@ -110,31 +157,31 @@ async def kucoin_disc(client):
         return None
     return _pick([c["symbol"] for c in j.get("data", []) if "PLTR" in c["symbol"].upper()])
 
+
 async def kucoin_kl(client, sym, start, end):
-    j = await _get(client, f"https://api-futures.kucoin.com/api/v1/kline/query?symbol={sym}&granularity=1&from={start}&to={end}")
+    j = await _get(client, f"https://api-futures.kucoin.com/api/v1/kline/query?symbol={sym}"
+                           f"&granularity=1&from={start}&to={end}")
     if not j or not j.get("data"):
         return []
-    # KuCoin: [time(ms), open, high, low, close, volume]
     return [[int(r[0]), float(r[1]), float(r[2]), float(r[3]), float(r[4]), float(r[5])] for r in j["data"]]
 
 
 VENUES = [
     ("bybit-perp",   lambda c: bybit_disc(c, "linear"), lambda c, s, a, b: bybit_kl(c, "linear", s, a, b)),
-    ("binance-perp", binance_disc,                      lambda c, s, a, b: binance_kl(c, s, a, b)),
-    ("kucoin-perp",  kucoin_disc,                       lambda c, s, a, b: kucoin_kl(c, s, a, b)),
+    ("binance-perp", binance_disc,                      binance_kl),
+    ("kucoin-perp",  kucoin_disc,                       kucoin_kl),
     ("bybit-spot",   lambda c: bybit_disc(c, "spot"),   lambda c, s, a, b: bybit_kl(c, "spot", s, a, b)),
 ]
 
 
 async def resolve_source(client):
-    """Return (venue_name, symbol, klfn) for the first venue that has PLTR data."""
+    """(venue, symbol, fetch) for the first venue with PLTR 1m candles at a recent open."""
     forced_v = os.getenv("BT_VENUE", "").strip()
     forced_s = os.getenv("BT_SYMBOL", "").strip()
-    probe_day = dt.datetime.now(NY).date() - dt.timedelta(days=1)
-    while probe_day.weekday() >= 5:
-        probe_day -= dt.timedelta(days=1)
-    op = dt.datetime.combine(probe_day, dt.time(9, 30), tzinfo=NY)
-    a, b = int((op - dt.timedelta(minutes=2)).timestamp() * 1000), int((op + dt.timedelta(minutes=10)).timestamp() * 1000)
+    probe = dt.datetime.now(NY).date() - dt.timedelta(days=1)
+    while probe.weekday() >= 5:
+        probe -= dt.timedelta(days=1)
+    op = dt.datetime.combine(probe, dt.time(9, 30), tzinfo=NY)
     for name, disc, klfn in VENUES:
         if forced_v and forced_v != name:
             continue
@@ -142,150 +189,307 @@ async def resolve_source(client):
             sym = forced_s or await disc(client)
             if not sym:
                 continue
-            # KuCoin uses seconds for from/to
-            aa, bb = (a, b) if "kucoin" not in name else (a // 1000, b // 1000)
-            rows = await klfn(client, sym, aa, bb)
-            if rows:
-                return name, sym, klfn
+            fetch = _fetcher(client, name, sym, klfn)
+            if await fetch(op - dt.timedelta(minutes=2), op + dt.timedelta(minutes=10)):
+                return name, sym, fetch
         except Exception:
             continue
     return None, None, None
 
 
-async def run_backtest(days=200):
-    if np is None:
-        return {"error": "numpy not installed", "generatedAt": dt.datetime.now(dt.timezone.utc).isoformat()}
-    async with httpx.AsyncClient(follow_redirects=True) as client:
-        venue, symbol, klfn = await resolve_source(client)
-        if not symbol:
-            return {"error": "no PLTR futures/spot contract reachable on Bybit, Binance or KuCoin",
-                    "generatedAt": dt.datetime.now(dt.timezone.utc).isoformat()}
-        is_kucoin = "kucoin" in venue
-        today = dt.datetime.now(NY).date()
-        dates, d = [], today - dt.timedelta(days=1)
-        while len(dates) < days:
-            if d.weekday() < 5:
-                dates.append(d)
-            d -= dt.timedelta(days=1)
-        dates.reverse()
+def _fetcher(client, venue, sym, klfn):
+    """fetch(start_dt, end_dt) -> {minute_ms: row}. KuCoin takes seconds, others ms."""
+    secs = "kucoin" in venue
 
-        sem = asyncio.Semaphore(4)
+    async def fetch(a, b):
+        a_ms, b_ms = int(a.timestamp() * 1000), int(b.timestamp() * 1000)
+        rows = await klfn(client, sym, a_ms // 1000 if secs else a_ms, b_ms // 1000 if secs else b_ms)
+        out = {}
+        for r in rows or []:
+            t = r[0] if r[0] > 1e12 else r[0] * 1000
+            out[int(t)] = r
+        return out
+    return fetch
 
-        async def one(day):
-            async with sem:
-                op = dt.datetime.combine(day, dt.time(9, 30), tzinfo=NY)
-                a = int((op - dt.timedelta(minutes=5)).timestamp() * 1000)
-                b = int((op + dt.timedelta(minutes=WIN_MIN + 1)).timestamp() * 1000)
-                aa, bb = (a, b) if not is_kucoin else (a // 1000, b // 1000)
-                rows = await klfn(client, symbol, aa, bb)
-                await asyncio.sleep(0.12)
-                if not rows:
-                    return None
-                open_ms = int(op.timestamp() * 1000)
-                cw = {}
-                for r in rows:
-                    t = r[0] if r[0] > 1e12 else r[0] * 1000  # normalise s->ms
-                    off = round((t - open_ms) / 60000)
-                    cw[off] = {"o": r[1], "c": r[4], "v": r[5]}
-                if not all(k in cw for k in (0, SIG_MIN, WIN_MIN)):
-                    return None
-                pre = cw.get(-1, cw[0]); o0 = cw[0]["o"]
-                p_sig = cw[SIG_MIN]["c"]; p_end = cw[WIN_MIN]["c"]
-                gap = (o0 / pre["c"] - 1) if pre["c"] else 0.0
-                r_sig = (p_sig / o0 - 1) if o0 else 0.0
-                r_rem = (p_end / p_sig - 1) if p_sig else 0.0
-                rng2 = max((abs(cw[m]["c"] / o0 - 1) for m in range(0, SIG_MIN + 1) if m in cw), default=0.0)
-                vol2 = sum(cw[m]["v"] for m in range(0, SIG_MIN + 1) if m in cw)
-                profile = []
-                for m in range(1, WIN_MIN + 1):
-                    if m in cw:
-                        prev = cw.get(m - 1, cw[0])["c"]
-                        profile.append((m, (cw[m]["c"] / prev - 1) if prev else 0.0))
-                return {"day": day.isoformat(), "gap": gap, "r_sig": r_sig, "r_rem": r_rem,
-                        "rng2": rng2, "vol2": vol2, "profile": profile}
 
-        results = await asyncio.gather(*[one(dd) for dd in dates])
-        samples = [s for s in results if s]
+def is_session(day):
+    return day.weekday() < 5 and day.isoformat() not in NYSE_HOLIDAYS
 
-    n = len(samples)
-    out = {"generatedAt": dt.datetime.now(dt.timezone.utc).isoformat(),
-           "source": f"{venue}:{symbol}", "venue": venue, "symbol": symbol,
-           "nDays": n, "signalMin": SIG_MIN, "windowMin": WIN_MIN,
-           "dateRange": [samples[0]["day"], samples[-1]["day"]] if samples else None,
-           "notes": [], "rules": [], "minuteProfile": [], "best": None, "passed70": False}
-    if n < 20:
-        out["notes"].append(f"Only {n} usable days from {venue}:{symbol} — too few to trust any edge. "
-                            "The contract's 1-minute history may be short, or the open window had gaps.")
-        _save(out); return out
 
-    for m in range(1, WIN_MIN + 1):
-        vals = [dict(s["profile"]).get(m) for s in samples]
-        vals = [v for v in vals if v is not None]
-        if vals:
-            arr = np.array(vals)
-            out["minuteProfile"].append({"m": m, "avgAbs": float(np.mean(np.abs(arr))),
-                                         "avgSigned": float(np.mean(arr)), "upShare": float(np.mean(arr > 0))})
+def sessions_through(day, n):
+    """The n NYSE sessions ending on `day` (inclusive), oldest first."""
+    out, d = [], day
+    while len(out) < n:
+        if is_session(d):
+            out.append(d)
+        d -= dt.timedelta(days=1)
+    return out[::-1]
 
-    cut = int(n * 0.7); train, test = samples[:cut], samples[cut:]
 
-    def eval_rule(fn, name, param=None):
-        def hit(sub):
-            picks = [(fn(s), s["r_rem"]) for s in sub]
-            picks = [(d, r) for d, r in picks if d != 0]
-            if not picks:
-                return (0, 0, 0.0)
-            k = sum(1 for d, r in picks if (r > 0) == (d > 0))
-            exp = float(np.mean([abs(r) if (r > 0) == (d > 0) else -abs(r) for d, r in picks]))
-            return (k, len(picks), exp)
-        ktr, ntr, _ = hit(train); kte, nte, expte = hit(test); lo, _ = wilson(kte, nte)
-        return {"name": name, "param": param,
-                "trainHit": round(ktr / ntr, 3) if ntr else None, "nTrain": ntr,
-                "testHit": round(kte / nte, 3) if nte else None, "nTest": nte,
-                "ciLow": round(lo, 3), "p": round(binom_p(kte, nte), 4),
-                "expectancy": round(expte * 100, 3)}
+def trading_days(n):
+    """Last n NYSE sessions before today (New York)."""
+    d, out = dt.datetime.now(NY).date() - dt.timedelta(days=1), []
+    while len(out) < n:
+        if d.weekday() < 5 and d.isoformat() not in NYSE_HOLIDAYS:
+            out.append(d)
+        d -= dt.timedelta(days=1)
+    return out[::-1]
 
-    for th in (0.0, 0.001, 0.002, 0.003, 0.005, 0.008):
-        out["rules"].append(eval_rule(lambda s, th=th: (1 if s["r_sig"] > th else -1 if s["r_sig"] < -th else 0),
-                                      f"Momentum: first-{SIG_MIN}min move > {th*100:.1f}% continues", th))
-    for th in (0.002, 0.005, 0.01):
-        out["rules"].append(eval_rule(lambda s, th=th: (-1 if s["gap"] > th else 1 if s["gap"] < -th else 0),
-                                      f"Gap fade: fade gap > {th*100:.1f}%", th))
-    for th in (0.005, 0.01):
-        out["rules"].append(eval_rule(lambda s, th=th: (1 if s["gap"] > th else -1 if s["gap"] < -th else 0),
-                                      f"Gap-and-go: follow gap > {th*100:.1f}%", th))
+
+async def load_days(fetch, days):
+    """Per day: the open window (09:25 -> 09:30+WIN_MIN) and the close (15:59, or 12:59 on early closes)."""
+    sem = asyncio.Semaphore(4)
+
+    async def one(day):
+        async with sem:
+            op = dt.datetime.combine(day, dt.time(9, 30), tzinfo=NY)
+            cl = dt.datetime.combine(day, close_time(day), tzinfo=NY)
+            win = await fetch(op - dt.timedelta(minutes=5), op + dt.timedelta(minutes=WIN_MIN + 1))
+            close = await fetch(cl - dt.timedelta(minutes=10), cl)
+            await asyncio.sleep(0.1)
+            return day, win, close
+    return await asyncio.gather(*[one(d) for d in days])
+
+
+# ------------------------------------------------------------------ samples
+def open_news_log():
+    """{ny_date: {"net": up-down, "n": headlines}} from the live desk's pre-open snapshots."""
+    path = os.path.join(os.getenv("LOG_DIR", os.path.join(HERE, "logs")), "signals.jsonl")
+    out = {}
     try:
-        X = np.array([[s["gap"], s["r_sig"], s["rng2"], s["vol2"]] for s in samples], float)
-        y = np.array([1.0 if s["r_rem"] > 0 else 0.0 for s in samples])
-        mu, sd = X[:cut].mean(0), X[:cut].std(0) + 1e-9
-        Xn = (X - mu) / sd; Xtr, Xte, ytr, yte = Xn[:cut], Xn[cut:], y[:cut], y[cut:]
-        w = np.zeros(Xtr.shape[1]); b = 0.0
-        for _ in range(4000):
-            p = 1 / (1 + np.exp(-(Xtr @ w + b))); g = p - ytr
-            w -= 0.1 * (Xtr.T @ g / len(ytr) + 0.01 * w); b -= 0.1 * g.mean()
-        pred = (1 / (1 + np.exp(-(Xte @ w + b))) > 0.5).astype(float)
-        k = int((pred == yte).sum()); nte = len(yte); lo, _ = wilson(k, nte)
-        out["rules"].append({"name": "Logistic reg [gap, r_sig, range, vol]", "param": None,
-                             "trainHit": None, "nTrain": len(ytr),
-                             "testHit": round(k / nte, 3) if nte else None, "nTest": nte,
-                             "ciLow": round(lo, 3), "p": round(binom_p(k, nte), 4), "expectancy": None})
-    except Exception as e:
-        out["notes"].append(f"logistic model skipped: {e}")
+        with open(path) as f:
+            for line in f:
+                try:
+                    r = json.loads(line)
+                except Exception:
+                    continue
+                if r.get("kind") == "open_news" and r.get("nyDate"):
+                    net = r["score"] if r.get("score") is not None else r.get("net", 0)
+                    out[r["nyDate"]] = {"net": net, "n": r.get("n", 0)}
+    except Exception:
+        pass
+    return out
 
-    valid = [r for r in out["rules"] if r.get("testHit") is not None and r.get("nTest", 0) >= 30]
-    if valid:
-        best = max(valid, key=lambda r: r["testHit"]); out["best"] = best
-        passes = best["testHit"] >= 0.70 and best["ciLow"] > 0.50 and best["nTest"] >= 30
+
+def build_samples(raw, news, partial=False):
+    """Turn per-day candle windows into feature rows. Pure: no I/O, easy to test.
+    partial=True keeps a day whose exit candle has not printed yet (r_rem=None):
+    that is how the live desk computes today's features at the decision minute."""
+    samples, prev_close, prev_prev = [], None, None
+    for day, win, close in raw:
+        op = dt.datetime.combine(day, dt.time(9, 30), tzinfo=NY)
+        o_ms = int(op.timestamp() * 1000)
+        cw = {round((t - o_ms) / 60000): r for t, r in win.items()}
+        day_close = close[max(close)][4] if close else None
+        need = (0, SIG_MIN) if partial else (0, SIG_MIN, WIN_MIN)
+        if all(k in cw for k in need) and prev_close:
+            o0 = cw[0][1]
+            pre = cw.get(-1, cw[0])[4]
+            p_sig, p_end = cw[SIG_MIN][4], (cw[WIN_MIN][4] if WIN_MIN in cw else None)
+            overnight = pre / prev_close - 1
+            prev_day = (prev_close / prev_prev - 1) if prev_prev else 0.0
+            nw = news.get(day.isoformat())
+            profile = [(m, cw[m][4] / cw[m - 1][4] - 1) for m in range(1, WIN_MIN + 1)
+                       if m in cw and (m - 1) in cw and cw[m - 1][4]]
+            samples.append({
+                "day": day.isoformat(),
+                "eat": op.astimezone(EAT).strftime("%H:%M"),
+                "overnight": overnight, "prevDay": prev_day,
+                "r_sig": p_sig / o0 - 1, "r_rem": (p_end / p_sig - 1) if p_end else None,
+                "entry": p_sig,
+                "event": abs(overnight) * 100 >= EVENT_PCT or day.isoformat() in EVENT_DATES,
+                "newsNet": nw["net"] if nw else None, "newsN": nw["n"] if nw else None,
+                "profile": profile})
+        # Roll the closes forward one session. A day with no close breaks the chain,
+        # so the next day is skipped instead of measuring "overnight" across 2+ days.
+        prev_prev, prev_close = prev_close, day_close
+    return samples
+
+
+# ------------------------------------------------------------------ rules
+def _sgn(x, th):
+    return 1 if x > th else -1 if x < -th else 0
+
+
+def rule_book():
+    """(family, name, fn(sample) -> -1/0/+1). Kept small on purpose: every extra
+    rule is another lottery ticket for a fluke."""
+    R = []
+    for th in (0.0, 0.001, 0.002, 0.004):
+        R.append(("momentum", f"Follow first {SIG_MIN}m move > {th*100:.1f}%",
+                  lambda s, th=th: _sgn(s["r_sig"], th)))
+        R.append(("fade", f"Fade first {SIG_MIN}m move > {th*100:.1f}%",
+                  lambda s, th=th: -_sgn(s["r_sig"], th)))
+    for th in (0.005, 0.01, 0.02):
+        R.append(("overnight", f"Follow overnight move > {th*100:.1f}%",
+                  lambda s, th=th: _sgn(s["overnight"], th)))
+        R.append(("overnight", f"Fade overnight move > {th*100:.1f}%",
+                  lambda s, th=th: -_sgn(s["overnight"], th)))
+    for th in (0.01, 0.03):
+        R.append(("daily", f"Follow prior-day change > {th*100:.0f}%",
+                  lambda s, th=th: _sgn(s["prevDay"], th)))
+        R.append(("daily", f"Fade prior-day change > {th*100:.0f}%",
+                  lambda s, th=th: -_sgn(s["prevDay"], th)))
+    R.append(("combo", f"Follow first {SIG_MIN}m move only when it agrees with overnight",
+              lambda s: _sgn(s["r_sig"], 0.001) if _sgn(s["r_sig"], 0.001) == _sgn(s["overnight"], 0.002) else 0))
+    R.append(("combo", f"Follow first {SIG_MIN}m move, quiet days only (no event)",
+              lambda s: 0 if s["event"] else _sgn(s["r_sig"], 0.001)))
+    R.append(("combo", f"Follow first {SIG_MIN}m move, event days only",
+              lambda s: _sgn(s["r_sig"], 0.001) if s["event"] else 0))
+    R.append(("combo", f"Fade first {SIG_MIN}m move, event days only",
+              lambda s: -_sgn(s["r_sig"], 0.001) if s["event"] else 0))
+    R.append(("news", "Follow pre-open news tally (|up-down| >= 2)",
+              lambda s: 0 if s["newsNet"] is None else _sgn(s["newsNet"], 1)))
+    R.append(("news", f"Follow first {SIG_MIN}m move only when news agrees",
+              lambda s: 0 if not s["newsNet"] else
+              (_sgn(s["r_sig"], 0.001) if _sgn(s["r_sig"], 0.001) == _sgn(s["newsNet"], 0) else 0)))
+    return R
+
+
+def score(fn, sub):
+    """Hit rate and net expectancy (% per trade after FEE_PCT) of a rule on a set of days."""
+    pnl = []
+    for s in sub:
+        d = fn(s)
+        if d:
+            pnl.append(d * s["r_rem"] * 100 - FEE_PCT)
+    n = len(pnl)
+    k = sum(1 for x in pnl if x > 0)
+    mean = sum(pnl) / n if n else None
+    sd = math.sqrt(sum((x - mean) ** 2 for x in pnl) / (n - 1)) if n > 1 else 0.0
+    t = mean / sd * math.sqrt(n) if sd else None
+    return {"n": n, "k": k, "hit": k / n if n else None,
+            "exp": mean, "t": t, "total": sum(pnl), "pnl": pnl}
+
+
+def run_rules(samples):
+    cut = int(len(samples) * 0.7)
+    train, test = samples[:cut], samples[cut:]
+    rules = []
+    for fam, name, fn in rule_book():
+        tr, te = score(fn, train), score(fn, test)
+        lo, _ = wilson(te["k"], te["n"])
+        rules.append({"family": fam, "name": name,
+                      "trainHit": _r(tr["hit"]), "nTrain": tr["n"], "trainExp": _r(tr["exp"], 4), "trainT": _r(tr["t"], 2),
+                      "testHit": _r(te["hit"]), "nTest": te["n"], "ciLow": round(lo, 3),
+                      "p": round(binom_p(te["k"], te["n"]), 4),
+                      "expectancy": _r(te["exp"], 4), "testTotalPct": round(te["total"], 2),
+                      "_fn": fn})
+    return rules, train, test
+
+
+def _r(x, nd=3):
+    return round(x, nd) if x is not None else None
+
+
+def regimes(samples):
+    """How the basic momentum call behaves under each kind of day. Descriptive only."""
+    fn = lambda s: _sgn(s["r_sig"], 0.001)
+    groups = {
+        "all days": samples,
+        "overnight up > 0.5%": [s for s in samples if s["overnight"] > 0.005],
+        "overnight down > 0.5%": [s for s in samples if s["overnight"] < -0.005],
+        "overnight flat": [s for s in samples if abs(s["overnight"]) <= 0.005],
+        "prior day up": [s for s in samples if s["prevDay"] > 0],
+        "prior day down": [s for s in samples if s["prevDay"] < 0],
+        f"event days (|overnight| >= {EVENT_PCT}%)": [s for s in samples if s["event"]],
+        "quiet days": [s for s in samples if not s["event"]],
+        "news logged": [s for s in samples if s["newsNet"] is not None],
+        "16:30 EAT opens (US summer time)": [s for s in samples if s["eat"] == "16:30"],
+        "17:30 EAT opens (US winter time)": [s for s in samples if s["eat"] == "17:30"],
+    }
+    out = []
+    for name, sub in groups.items():
+        sc = score(fn, sub)
+        out.append({"name": name, "days": len(sub), "trades": sc["n"], "hit": _r(sc["hit"]),
+                    "expectancy": _r(sc["exp"], 4),
+                    "avgAbsMovePct": _r(sum(abs(s["r_rem"]) for s in sub) / len(sub) * 100, 3) if sub else None})
+    return out
+
+
+# ------------------------------------------------------------------ report
+def _passes(hit, n, exp):
+    lo, _ = wilson(round(hit * n), n) if hit is not None and n else (0.0, 0.0)
+    return bool(hit is not None and hit >= 0.70 and lo > 0.50 and n >= MIN_TEST and (exp or 0) > 0), round(lo, 3)
+
+
+def adaptive_study(samples):
+    """Walk forward with recency weights. Half-life picked on train, judged on test."""
+    rules = rule_book()
+    dirs, pnl = adaptive.matrix(samples, rules, FEE_PCT)
+    n, cut = len(samples), int(len(samples) * 0.7)
+    warm = min(40, cut // 2)
+    table = []
+    for hl in adaptive.HALF_LIVES:
+        tr = adaptive.summarize(adaptive.walk(samples, pnl, dirs, rules, hl, warm, cut))
+        te_trades = adaptive.walk(samples, pnl, dirs, rules, hl, cut, n)
+        table.append({"halfLife": hl, "train": tr, "test": adaptive.summarize(te_trades), "_trades": te_trades})
+    ok = [r for r in table if r["train"]["n"] >= MIN_TRAIN // 2 and r["train"]["t"] is not None]
+    chosen = max(ok, key=lambda r: r["train"]["t"]) if ok else None
+    res = {"table": [{k: v for k, v in r.items() if k != "_trades"} for r in table],
+           "halfLife": chosen["halfLife"] if chosen else None, "passed": False}
+    if chosen:
+        te = chosen["test"]
+        res["passed"], res["ciLow"] = _passes(te["hit"], te["n"], te["exp"])
+        res["test"] = te
+        res["recent"] = chosen["_trades"][-10:]
+        ranking = adaptive.rank(pnl, n, chosen["halfLife"], rules)
+        res["ranking"] = ranking[:5]
+        best = adaptive.pick(ranking)
+        res["today"] = best["name"] if best else "stand aside"
+    return res
+
+
+def analyse(samples, meta):
+    n = len(samples)
+    out = {"generatedAt": dt.datetime.now(dt.timezone.utc).isoformat(), **meta,
+           "nDays": n, "signalMin": SIG_MIN, "windowMin": WIN_MIN, "feePct": FEE_PCT,
+           "dateRange": [samples[0]["day"], samples[-1]["day"]] if samples else None,
+           "notes": [], "rules": [], "regimes": [], "best": None, "passed70": False,
+           "adaptive": None, "samples": [_compact(s) for s in samples[-400:]]}
+    if n < 30:
+        out["notes"].append(f"Only {n} usable days - too few to judge any rule.")
+        return out
+
+    rules, train, test = run_rules(samples)
+    out["split"] = {"train": [train[0]["day"], train[-1]["day"]], "test": [test[0]["day"], test[-1]["day"]]}
+    out["regimes"] = regimes(samples)
+
+    eligible = [r for r in rules if r["nTrain"] >= MIN_TRAIN and r["trainT"] is not None]
+    if eligible:
+        best = max(eligible, key=lambda r: r["trainT"])
+        passes = (best["testHit"] or 0) >= 0.70 and best["ciLow"] > 0.50 and best["nTest"] >= MIN_TEST \
+            and (best["expectancy"] or 0) > 0
         out["passed70"] = bool(passes)
+        out["best"] = {k: v for k, v in best.items() if k != "_fn"}
+
+    ad = adaptive_study(samples)
+    out["adaptive"] = ad
+    if ad.get("test"):
+        te = ad["test"]
+        hl = "equal weights" if ad["halfLife"] is None else f"half-life {ad['halfLife']} sessions"
         out["notes"].append(
-            (f"Best out-of-sample rule: '{best['name']}' — {best['testHit']*100:.0f}% on {best['nTest']} "
-             f"held-out days (95% floor {best['ciLow']*100:.0f}%, p={best['p']}). ")
-            + ("CLEARS the 70% bar out-of-sample — validate live before automating."
-               if passes else "Does NOT clear a trustworthy 70% out-of-sample. Treat as no reliable edge yet."))
-    else:
-        out["notes"].append("No rule had >=30 out-of-sample trades — need more history to judge.")
-    out["notes"].append(f"Source: {venue} contract {symbol}. Tested {len(out['rules'])} rules; the out-of-sample figure is the honest one.")
-    out["notes"].append("Gross of fees/slippage; these contracts can be thin at the open — model real fills before automating.")
-    _save(out); return out
+            f"Adaptive ({hl}, chosen on train): {te['n']} test trades, hit "
+            f"{(te['hit'] or 0)*100:.0f}%, net {te['exp'] if te['exp'] is not None else 0:+.3f}% per trade, "
+            f"{te['total']:+.2f}% total. " + ("PASSES." if ad["passed"] else "Does not pass."))
+    b = out["best"]
+    if b and b["testHit"] is not None:
+        out["notes"].append(f"Fixed rule for comparison ('{b['name']}'): {b['nTest']} test trades, hit "
+                            f"{b['testHit']*100:.0f}%, net {b['expectancy']:+.3f}% per trade.")
+    logged = sum(1 for s in samples if s["newsNet"] is not None)
+    out["notes"].append(f"News snapshots on {logged} of {n} days; news rules only score those.")
+    if samples[-1]["day"] > HOLIDAYS_KNOWN_TO:
+        out["notes"].append(f"WARNING: the NYSE holiday list in backtest.py ends {HOLIDAYS_KNOWN_TO}. "
+                            "Add later holidays or those days will be scored as fake opens.")
+    out["notes"].append(f"All results net of {FEE_PCT}% round-trip fees. Open is 16:30 EAT, "
+                        "17:30 EAT from 2 Nov 2026 to 12 Mar 2027.")
+    out["rules"] = [{k: v for k, v in r.items() if k != "_fn"} for r in rules]
+    return out
+
+
+def _compact(s):
+    """What the live desk needs to keep re-ranking rules as new opens arrive."""
+    return {k: (round(v, 6) if isinstance(v, float) else v) for k, v in s.items() if k != "profile"}
 
 
 def _save(out):
@@ -297,8 +501,37 @@ def _save(out):
         pass
 
 
+async def run_backtest(days=200):
+    now = dt.datetime.now(dt.timezone.utc).isoformat()
+    async with httpx.AsyncClient(follow_redirects=True) as client:
+        venue, symbol, fetch = await resolve_source(client)
+        if not symbol:
+            return {"error": "no PLTR perp/spot contract reachable on Bybit, Binance or KuCoin", "generatedAt": now}
+        raw = await load_days(fetch, trading_days(days))
+    samples = build_samples(raw, open_news_log())
+    out = analyse(samples, {"source": f"{venue}:{symbol}", "venue": venue, "symbol": symbol})
+    _save(out)
+    return out
+
+
 if __name__ == "__main__":
     r = asyncio.run(run_backtest(days=int(os.getenv("BT_DAYS", "200"))))
-    print(json.dumps({k: r.get(k) for k in ("source", "nDays", "dateRange", "passed70", "best", "error")}, indent=2))
-    for note in r.get("notes", []):
-        print("•", note)
+    if r.get("error"):
+        print("ERROR:", r["error"]); raise SystemExit(1)
+    print(f"source {r['source']}  days {r['nDays']}  {r['dateRange']}  fee {r['feePct']}%\n")
+    ad = r.get("adaptive") or {}
+    print("adaptive walk-forward (rule re-picked each morning from past days only):")
+    print(f"  {'half-life':>10} {'train n':>8} {'train t':>8} {'test n':>7} {'test hit':>9} {'net%/trade':>11}")
+    for row in ad.get("table", []):
+        tr, te = row["train"], row["test"]
+        hl = "equal" if row["halfLife"] is None else str(row["halfLife"])
+        mark = " <- chosen on train" if row["halfLife"] == ad.get("halfLife") else ""
+        hit = f"{te['hit']*100:.0f}%" if te["hit"] is not None else "-"
+        ex = f"{te['exp']:+.3f}" if te["exp"] is not None else "-"
+        print(f"  {hl:>10} {tr['n']:>8} {str(tr['t']):>8} {te['n']:>7} {hit:>9} {ex:>11}{mark}")
+    print(f"\n  passes: {ad.get('passed')}   today's rule: {ad.get('today')}")
+    for x in ad.get("ranking", []):
+        print(f"    {x['name'][:58]:58} w.hit {x['wHit']*100:.0f}%  w.net {x['wExp']:+.3f}%  t {x['wT']}")
+    print()
+    for note in r["notes"]:
+        print("-", note)

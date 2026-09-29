@@ -2,6 +2,7 @@ services:
   - type: web
     name: pltr-signal-desk
     runtime: python
+    region: frankfurt        # Binance and Bybit block US IPs; Render's default region is Oregon (US)
     plan: free               # deploys without a paid plan; sleeps when idle (upgrade to "starter" for always-on)
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
@@ -13,7 +14,13 @@ services:
       - key: ANTHROPIC_API_KEY   # enables the AI news/signal agent
         sync: false
       - key: AI_MODEL
-        value: claude-3-5-haiku-latest
+        value: claude-haiku-4-5-20251001
+      - key: SUPERVISOR_MODEL   # AI supervisor for the open trade
+        value: claude-opus-5-5
+      - key: SEC_UA             # "Your Name your@email"; SEC blocks anonymous requests
+        sync: false
+      - key: TRADE_TOKEN        # password for the Trade panel; required on a public host
+        sync: false
       - key: X_BEARER_TOKEN      # optional: X/Twitter buzz
         sync: false
       - key: LARGE_TRADE_USD
