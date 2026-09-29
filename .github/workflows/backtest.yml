@@ -1,0 +1,45 @@
+name: Live backtest
+
+# Runs the open-session backtest on GitHub's servers, which (unlike some build
+# sandboxes) can reach the exchanges. Start it from the Actions tab
+# ("Run workflow"); it also runs every weekday after the US close.
+on:
+  workflow_dispatch:
+    inputs:
+      days:
+        description: "Trading days to test"
+        default: "200"
+  schedule:
+    - cron: "30 21 * * 1-5"      # 21:30 UTC = after the 16:00 New York close
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Offline tests
+        run: |
+          for t in tests/test_*.py; do python "$t"; done
+      - name: Which exchanges answer from here
+        run: |
+          for u in https://api.bybit.com/v5/market/time https://fapi.binance.com/fapi/v1/time \
+                   https://api-futures.kucoin.com/api/v1/timestamp https://query1.finance.yahoo.com/v8/finance/chart/PLTR; do
+            echo "$u -> $(curl -s -o /dev/null -w '%{http_code}' -m 10 "$u")"
+          done
+      - name: Backtest on live data
+        env:
+          BT_DAYS: ${{ github.event.inputs.days || '200' }}
+        run: python backtest.py | tee backtest.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: backtest-result
+          path: |
+            backtest.txt
+            static/backtest.json
+          if-no-files-found: ignore
