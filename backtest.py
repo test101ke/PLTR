@@ -34,7 +34,7 @@ VENUES: Bybit, Binance, Bitget, OKX, Gate, MEXC, KuCoin, Bybit spot). Pin with
 BT_VENUE/BT_SYMBOL. Which venues answer depends on where this runs.
 
 Run:  python backtest.py            (writes static/backtest.json)
-Env:  BT_DAYS=200 BT_SIGNAL_MIN=2 BT_WINDOW_MIN=15 BT_FEE_PCT=0.10
+Env:  BT_DAYS=200 BT_SIGNAL_MIN=2 BT_WINDOW_MIN=15 BT_FEE_PCT=0.12
       BT_EVENT_PCT=2.5 BT_EVENTS=2026-08-04,2026-11-03
 """
 import os, json, math, asyncio, datetime as dt
@@ -52,7 +52,7 @@ EAT = ZoneInfo("Africa/Nairobi")
 HERE = os.path.dirname(os.path.abspath(__file__))
 SIG_MIN = int(os.getenv("BT_SIGNAL_MIN", "2"))
 WIN_MIN = int(os.getenv("BT_WINDOW_MIN", "15"))
-FEE_PCT = float(os.getenv("BT_FEE_PCT", "0.10"))
+FEE_PCT = float(os.getenv("BT_FEE_PCT", "0.12"))     # worst case: 0.06% a side
 EVENT_PCT = float(os.getenv("BT_EVENT_PCT", "2.5"))
 EVENT_DATES = {d.strip() for d in os.getenv("BT_EVENTS", "").split(",") if d.strip()}
 MIN_TRAIN = 30
@@ -582,6 +582,11 @@ async def run_backtest(days=200):
         raw = await load_days(fetch, trading_days(days))
     samples = build_samples(raw, open_news_log())
     out = analyse(samples, {"source": f"{venue}:{symbol}", "venue": venue, "symbol": symbol})
+    try:
+        import orb_backtest
+        out["orb"] = orb_backtest.study(raw)          # the ORB trader's presets on the same candles
+    except Exception as e:
+        out["orb"] = {"error": f"{type(e).__name__}: {e}"}
     _save(out)
     return out
 
@@ -604,6 +609,18 @@ if __name__ == "__main__":
     print(f"\n  passes: {ad.get('passed')}   today's rule: {ad.get('today')}")
     for x in ad.get("ranking", []):
         print(f"    {x['name'][:58]:58} w.hit {x['wHit']*100:.0f}%  w.net {x['wExp']:+.3f}%  t {x['wT']}")
+    orb = r.get("orb") or {}
+    if orb and "error" not in orb:
+        print("\nORB trader presets on the same candles ($100 batch at 10x, 0.06%/side fees, book filter off):")
+        print(f"  {'preset':11} {'trades':>6} {'win':>5} {'$/trade':>8} {'total $':>8} {'$/day':>7} {'worst day':>9} {'max DD':>7} | newest 30%: total $")
+        for k, v in orb.items():
+            a, n = v["all"], v["newest30"]
+            f = lambda x, d=2: "-" if x is None else f"{x:+.{d}f}"
+            w = "-" if a["winRate"] is None else f"{a['winRate']:.0f}%"
+            print(f"  {v['label']:11} {a['trades']:>6} {w:>5} {f(a['perTrade'],3):>8} {f(a['total']):>8} "
+                  f"{f(a['perDay'],3):>7} {f(a['worstDay']):>9} {f(a['maxDrawdown']):>7} | {f(n['total'])}")
+    elif orb:
+        print("ORB replay failed:", orb["error"])
     print()
     for note in r["notes"]:
         print("-", note)
