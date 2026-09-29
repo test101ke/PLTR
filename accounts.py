@@ -62,10 +62,27 @@ def _secret_file(path, nbytes=32):
     return v
 
 
+def _writable(path, fallback):
+    """DATA_DIR if the server can write there, else the app's own folder. On Render
+    without a persistent disk, /var/data does not exist and cannot be created."""
+    for p in (path, fallback):
+        try:
+            os.makedirs(p, exist_ok=True)
+            probe = os.path.join(p, ".write_test")
+            with open(probe, "w") as f:
+                f.write("ok")
+            os.remove(probe)
+            return p
+        except OSError:
+            continue
+    return fallback
+
+
 class Accounts:
     def __init__(self, data_dir=None, env=None):
         env = env if env is not None else os.environ
-        self.dir = data_dir or env.get("DATA_DIR") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
+        local = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
+        self.dir = _writable(data_dir or env.get("DATA_DIR") or local, local)
         self.path = os.path.join(self.dir, "accounts.json")
         self.signup_code = env.get("SIGNUP_CODE", "")
         ks = env.get("KEYS_SECRET", "")
