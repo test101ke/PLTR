@@ -150,7 +150,7 @@ The Opening Range Breakout trader (`trader.py`) trades the **PLTR USDT perpetual
 
 | Preset | First target | Then | Stop |
 |---|---|---|---|
-| Scalp | $1 net, close all | – | $1.50 incl. fees, instant |
+| Scalp | $1 net, close all | – | $2.20 incl. fees (never closer than 0.10% of price), instant |
 | **Runner** (default) | $1 net, bank 50% | trail 0.15% behind the best price | half the opening range, ignored for 3s, must hold 0.5s; break-even at +$0.60 |
 | Wick-proof | $1 net, bank 30% | trail 0.25% | full opening range, ignored for 10s, must hold 1s; break-even at +$0.50 |
 | Burst | +$0.50 arms the trail, nothing banked | trail 0.08% | half the range, ignored for 2s, must hold 0.3s; break-even at +$0.40 |
