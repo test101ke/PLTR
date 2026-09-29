@@ -1,0 +1,691 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>PLTR Trading</title>
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" type="image/png" sizes="32x32" href="/static/icons/icon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/static/icons/icon-16.png">
+<link rel="apple-touch-icon" href="/static/icons/icon-180.png">
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#eef1f6" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#070a10" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="PLTR Desk">
+<meta name="description" content="Live Palantir trading desk — composite signal, order book, AMD sessions, fast news and insider/congress disclosures.">
+<style>
+/* ---------------------------------------------------------------------------
+   PLTR Signal Desk — visual system
+   Apple-flavoured: one accent, hairlines instead of boxes, colour only where it
+   carries meaning (up / down), generous air, and a tight type scale.
+   --------------------------------------------------------------------------- */
+:root{
+  --bg:#f5f5f7; --bg-2:#ececf0;
+  --card:rgba(255,255,255,.82); --card-solid:#fff; --fill:rgba(118,118,128,.08); --fill-2:rgba(118,118,128,.12);
+  --line:rgba(60,60,67,.13); --line-2:rgba(60,60,67,.07);
+  --ink:#1d1d1f; --ink-2:#4b4b50; --ink-3:#86868b;
+  --accent:#0071e3; --accent-soft:rgba(0,113,227,.10);
+  --up:#00875a; --up-soft:rgba(0,135,90,.10);
+  --down:#d70015; --down-soft:rgba(215,0,21,.09);
+  --flat:#9a6700; --flat-soft:rgba(154,103,0,.10);
+  --grid:rgba(60,60,67,.10);
+  --bar:rgba(255,255,255,.95);
+  --shadow:0 0 0 .5px rgba(0,0,0,.04), 0 8px 28px -20px rgba(0,0,0,.30);
+  --r-lg:18px; --r-md:12px; --r-sm:9px;
+  --rail:clamp(320px,22vw,400px); --hdr:66px;
+}
+/* true black, not charcoal — cards sit just off the background, separated by a
+   hairline rather than by a lighter grey fill */
+:root[data-theme="dark"]{
+  --bg:#000; --bg-2:#000;
+  --card:rgba(14,14,16,.86); --card-solid:#0e0e10;
+  --fill:rgba(255,255,255,.055); --fill-2:rgba(255,255,255,.09);
+  --line:rgba(255,255,255,.11); --line-2:rgba(255,255,255,.055);
+  --ink:#f5f5f7; --ink-2:#b9b9c0; --ink-3:#78787f;
+  --accent:#0a84ff; --accent-soft:rgba(10,132,255,.16);
+  --up:#30d158; --up-soft:rgba(48,209,88,.14);
+  --down:#ff453a; --down-soft:rgba(255,69,58,.14);
+  --flat:#ffd60a; --flat-soft:rgba(255,214,10,.12);
+  --grid:rgba(255,255,255,.08);
+  --bar:rgba(6,6,8,.95);
+  --shadow:0 0 0 .5px rgba(255,255,255,.05), 0 8px 30px -22px rgba(0,0,0,1);
+}
+*{box-sizing:border-box}
+html{background:var(--bg)}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","SF Pro Display","Helvetica Neue",Inter,system-ui,sans-serif;
+  font-size:14px;line-height:1.45;letter-spacing:-.011em;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+img{max-width:100%}
+.mono{font-family:ui-monospace,"SF Mono",SFMono-Regular,Menlo,monospace;font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+.muted{color:var(--ink-3)}
+.wrap{max-width:min(1900px,100%);margin:0 auto;min-height:100dvh;display:flex;flex-direction:column;
+  padding:14px clamp(14px,2.2vw,30px) 40px;
+  padding-left:max(clamp(14px,2.2vw,30px),env(safe-area-inset-left));
+  padding-right:max(clamp(14px,2.2vw,30px),env(safe-area-inset-right));
+  padding-bottom:calc(40px + env(safe-area-inset-bottom))}
+
+/* surfaces ---------------------------------------------------------------- */
+.card{background:var(--card);-webkit-backdrop-filter:saturate(180%) blur(20px);backdrop-filter:saturate(180%) blur(20px);
+  border:.5px solid var(--line);border-radius:var(--r-lg);box-shadow:var(--shadow)}
+.pad{padding:18px 20px}
+.eyebrow{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3)}
+h1,h2,h3{margin:0;font-weight:600;letter-spacing:-.02em}
+.sect-h{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin:0 0 12px}
+.sect-h h3{font-size:15px;color:var(--ink)}
+.sect-h .sp{margin-left:auto}
+.sect-h .note{font-size:12px;color:var(--ink-3);font-weight:400}
+.sub-h{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);margin:20px 0 8px}
+.sub-h:first-child{margin-top:0}
+
+/* grouped inset list — the iOS Settings idiom, used everywhere a table would be */
+.list{border-radius:var(--r-md);overflow:hidden;background:var(--fill)}
+.item{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 13px;position:relative}
+.item+.item::before{content:"";position:absolute;left:13px;right:0;top:0;height:.5px;background:var(--line-2)}
+.item .k{font-size:13px;color:var(--ink-2);min-width:0}
+.item .v{font-size:13.5px;font-weight:590;text-align:right;white-space:nowrap}
+.item .v.up{color:var(--up)}.item .v.down{color:var(--down)}
+.tag{font-size:11px;font-weight:590;padding:1.5px 7px;border-radius:99px;margin-left:7px;white-space:nowrap}
+.tag.up{color:var(--up);background:var(--up-soft)}.tag.down{color:var(--down);background:var(--down-soft)}
+.tag.flat{color:var(--flat);background:var(--flat-soft)}
+
+/* stat tiles */
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(118px,1fr));gap:9px}
+.tiles>*:last-child,.fsum>*:last-child{grid-column-end:-1}
+.tile{background:var(--fill);border-radius:var(--r-md);padding:11px 12px;min-width:0}
+.tile .k{font-size:11.5px;color:var(--ink-3);font-weight:500}
+.tile .v{font-size:17px;font-weight:600;margin-top:2px;letter-spacing:-.02em;overflow-wrap:break-word}
+.tile .x{font-size:11px;color:var(--ink-3);margin-top:1px;overflow-wrap:anywhere}
+.tile .v.up{color:var(--up)}.tile .v.down{color:var(--down)}
+
+.chip{display:inline-flex;align-items:center;gap:5px;padding:2.5px 9px;border-radius:99px;font-size:12.5px;
+  font-weight:590;white-space:nowrap;flex:none;background:var(--fill);color:var(--ink-2)}
+.chip.up{color:var(--up);background:var(--up-soft)}
+.chip.down{color:var(--down);background:var(--down-soft)}
+.chip.flat{color:var(--flat);background:var(--flat-soft)}
+.chip.tiny{font-size:11px;padding:2px 8px}
+
+/* header ------------------------------------------------------------------ */
+.top{position:sticky;top:0;z-index:50;display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+  padding:10px 16px;margin-bottom:12px;background:var(--bar);
+  -webkit-backdrop-filter:saturate(180%) blur(20px);backdrop-filter:saturate(180%) blur(20px);
+  border:.5px solid var(--line);border-radius:16px;box-shadow:var(--shadow)}
+.brand{display:flex;align-items:center;gap:10px;min-width:0}
+.mark{width:30px;height:30px;border-radius:8px;display:grid;place-items:center;flex:none;
+  background:linear-gradient(145deg,#0a84ff,#5e5ce6 55%,#30d158)}
+.mark svg{width:16px;height:16px}
+.brand h1{font-size:15px}
+.brand .sub{font-size:11px;color:var(--ink-3);margin-top:-1px}
+.hprice{display:flex;align-items:baseline;gap:8px;margin-left:auto;min-width:0}
+.hprice .px{font-size:24px;font-weight:600;letter-spacing:-.03em;flex:none}
+.flash-up{animation:fu .55s}.flash-dn{animation:fd .55s}
+@keyframes fu{0%{color:var(--up)}100%{color:var(--ink)}}
+@keyframes fd{0%{color:var(--down)}100%{color:var(--ink)}}
+.hmeta{display:flex;align-items:center;gap:10px}
+.status{display:flex;flex-direction:column;gap:1px;font-size:10.5px;color:var(--ink-3);text-align:right}
+.live{display:inline-flex;align-items:center;gap:5px;font-weight:590;color:var(--ink-2)}
+.dot{width:6px;height:6px;border-radius:50%;background:var(--ink-3);flex:none}
+.dot.on{background:var(--up)}.dot.stale{background:var(--flat)}.dot.off{background:var(--down)}
+.tbtn{appearance:none;border:.5px solid var(--line);background:var(--fill);color:var(--ink-2);width:32px;height:32px;
+  border-radius:9px;cursor:pointer;font-size:14px;display:grid;place-items:center;flex:none;transition:.15s}
+.tbtn:hover{background:var(--accent-soft);color:var(--accent)}
+.tbtn:focus-visible,.tab:focus-visible,.ib:focus-visible,.seg button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* 1 — THE CALL ------------------------------------------------------------ */
+.hero{padding:20px 22px;margin-bottom:12px;display:grid;grid-template-columns:minmax(220px,300px) 1fr;gap:26px;align-items:start}
+.callword{font-size:clamp(34px,4.6vw,52px);font-weight:640;line-height:1;letter-spacing:-.035em}
+.callword.buy{color:var(--up)}.callword.sell{color:var(--down)}.callword.side{color:var(--flat)}
+.callbias{font-size:13.5px;color:var(--ink-2);margin-top:7px}
+.conf{margin-top:12px}
+.conf .bar{height:5px;border-radius:99px;background:var(--fill-2);overflow:hidden}
+.conf .fill{height:100%;border-radius:99px;background:var(--accent);transition:width .5s ease}
+.conf .lab{display:flex;justify-content:space-between;font-size:11.5px;color:var(--ink-3);margin-top:6px}
+.tfstrip{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:7px}
+.tfstrip .lbl{display:none}
+.tf{background:var(--fill);border-radius:var(--r-md);padding:9px 6px;text-align:center;min-width:0}
+.tf .t{font-size:10.5px;color:var(--ink-3);font-weight:590}
+.tf .w{font-size:12.5px;font-weight:640;margin-top:2px;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.tf .r{font-size:10.5px;color:var(--ink-3);margin-top:1px}
+.tf.up .w{color:var(--up)}.tf.down .w{color:var(--down)}.tf.side .w{color:var(--ink-3)}.tf.na .w{color:var(--ink-3)}
+.factors{display:flex;flex-direction:column;border-radius:var(--r-md);overflow:hidden;background:var(--fill)}
+.factor{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 13px;position:relative}
+.factor+.factor::before{content:"";position:absolute;left:13px;right:0;top:0;height:.5px;background:var(--line-2)}
+.factor .k{font-size:12.5px;color:var(--ink-2);flex:0 0 auto}
+.factor .v{display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:590;flex:1 1 0;min-width:0;justify-content:flex-end;text-align:right}
+.factor .v small{font-weight:400;color:var(--ink-3);font-size:12px;white-space:normal}
+.arrow{font-size:11px;width:14px;min-width:14px;flex:none;text-align:center}
+.arrow.u{color:var(--up)}.arrow.d{color:var(--down)}.arrow.f{color:var(--flat)}
+
+/* disclosure --------------------------------------------------------------- */
+.fold{border-radius:var(--r-lg)}
+.fold>summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:9px;
+  font-size:15px;font-weight:600;letter-spacing:-.02em;padding:2px 0;color:var(--ink)}
+.fold>summary::-webkit-details-marker{display:none}
+.fold>summary::after{content:"";margin-left:auto;width:7px;height:7px;flex:none;
+  border-right:1.6px solid var(--ink-3);border-bottom:1.6px solid var(--ink-3);
+  transform:rotate(45deg) translate(-2px,-2px);transition:transform .2s}
+.fold[open]>summary::after{transform:rotate(-135deg) translate(-2px,-2px)}
+.fold>summary .why{font-size:12.5px;font-weight:400;color:var(--ink-3);margin-left:2px}
+.foldbody{padding-top:14px}
+.mini{border-radius:var(--r-md);background:var(--fill);padding:2px 0;margin-top:10px}
+.mini>summary{list-style:none;cursor:pointer;padding:8px 13px;font-size:12.5px;font-weight:590;color:var(--accent)}
+.mini>summary::-webkit-details-marker{display:none}
+.mini[open]>summary{color:var(--ink-3)}
+
+/* tabs --------------------------------------------------------------------- */
+.tabwrap{position:sticky;top:var(--hdr);z-index:40;padding:10px 0 0;margin-bottom:12px;background:var(--bg)}
+.tabs{display:flex;gap:2px;padding:3px;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;
+  background:var(--bar);-webkit-backdrop-filter:saturate(180%) blur(20px);backdrop-filter:saturate(180%) blur(20px);
+  border:.5px solid var(--line);border-radius:12px;box-shadow:var(--shadow)}
+.tabs::-webkit-scrollbar{display:none}
+.tabwrap::after{content:"";position:absolute;top:3px;bottom:3px;right:3px;width:30px;pointer-events:none;
+  border-radius:0 10px 10px 0;background:linear-gradient(90deg,transparent,var(--bar) 78%);opacity:0;transition:opacity .2s}
+.tabwrap.more::after{opacity:1}
+.tab{border:0;background:transparent;color:var(--ink-3);padding:6px 13px;border-radius:9px;font-size:13px;
+  font-weight:560;cursor:pointer;white-space:nowrap;font-family:inherit;letter-spacing:-.01em;transition:.15s}
+.tab:hover{color:var(--ink-2)}
+.tab[aria-selected="true"]{background:var(--card-solid);color:var(--ink);box-shadow:0 0 0 .5px var(--line),0 1px 3px rgba(0,0,0,.06)}
+
+/* layout ------------------------------------------------------------------- */
+.grid{display:grid;grid-template-columns:minmax(0,1fr) var(--rail);gap:12px;align-items:start;flex:1 1 auto}
+.grid>main{min-width:0;display:flex;flex-direction:column;gap:12px}
+.panel{padding:18px 20px;scroll-margin-top:calc(var(--hdr) + 72px)}
+.panel[hidden]{display:none}
+.rail{display:flex;flex-direction:column;gap:12px;position:sticky;top:calc(var(--hdr) + 12px);
+  max-height:calc(100dvh - var(--hdr) - 34px);overflow-y:auto;scrollbar-width:thin}
+
+/* "i" explainers ----------------------------------------------------------- */
+.ib{appearance:none;border:.5px solid var(--line);background:var(--fill);color:var(--ink-3);
+  width:15px;height:15px;min-width:15px;border-radius:50%;font-size:9.5px;font-weight:600;line-height:1;
+  cursor:pointer;padding:0;display:inline-grid;place-items:center;vertical-align:middle;margin-left:5px;
+  font-family:inherit;text-transform:none;letter-spacing:0;transition:.15s}
+.ib:hover,.ib[aria-expanded="true"]{background:var(--accent);border-color:var(--accent);color:#fff}
+.ipop{position:fixed;z-index:200;max-width:min(330px,calc(100vw - 24px));padding:13px 15px;border-radius:14px;
+  background:var(--card-solid);border:.5px solid var(--line);
+  box-shadow:0 0 0 .5px rgba(0,0,0,.05),0 18px 44px -14px rgba(0,0,0,.35);
+  font-size:12.5px;line-height:1.5;color:var(--ink-2)}
+.ipop h4{margin:0 0 5px;font-size:13px;font-weight:600;color:var(--ink)}
+.ipop b{color:var(--ink);font-weight:590}
+.ipop .rd{display:block;margin-top:8px;padding-top:8px;border-top:.5px solid var(--line-2);color:var(--ink-3);font-size:11.5px}
+
+/* segmented control -------------------------------------------------------- */
+.seg{display:inline-flex;gap:2px;padding:2px;border-radius:8px;background:var(--fill-2)}
+.seg button{appearance:none;border:0;background:transparent;color:var(--ink-2);font:inherit;font-size:11.5px;
+  font-weight:590;padding:3px 11px;border-radius:6px;cursor:pointer;transition:.15s}
+.seg button[aria-pressed="true"]{background:var(--card-solid);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.10)}
+
+/* market ------------------------------------------------------------------- */
+.mkthead{display:flex;flex-wrap:wrap;gap:8px;align-items:baseline;margin-bottom:12px}
+.mkthead .big{font-size:26px;font-weight:600;letter-spacing:-.03em}
+.exstrip{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+.expill{font-size:11px;padding:3px 9px;border-radius:99px;background:var(--fill);color:var(--ink-2)}
+.expill .nm{color:var(--ink-3);margin-right:5px}
+.book{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.bookcol{width:100%;max-width:420px}  /* ladder legibility, deliberate */
+.book>.bookcol:first-child{margin-left:auto}
+.bookcol .bh{display:flex;justify-content:space-between;font-size:11px;color:var(--ink-3);font-weight:590;padding:0 6px 5px}
+.brow{position:relative;display:flex;justify-content:space-between;padding:3px 7px;font-size:12.5px;border-radius:5px;overflow:hidden}
+.brow .depth{position:absolute;top:0;bottom:0;opacity:.13}
+.bids .depth{right:0;background:var(--up)}.asks .depth{left:0;background:var(--down)}
+.brow .p{position:relative;font-weight:590}.bids .p{color:var(--up)}.asks .p{color:var(--down)}
+.brow .s{position:relative;color:var(--ink-2)}
+.imb{margin:10px 0 2px}
+.imb .bar{height:5px;border-radius:99px;overflow:hidden;display:flex;background:var(--down-soft)}
+.imb .b{background:var(--up)}
+.imb .lab{display:flex;justify-content:space-between;font-size:11.5px;font-weight:590;margin-top:6px}
+.imb .lab .u{color:var(--up)}.imb .lab .d{color:var(--down)}
+.tape{display:flex;flex-direction:column;max-height:clamp(230px,30vh,380px);overflow-y:auto;
+  border-radius:var(--r-md);background:var(--fill)}
+.trow{display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:8px;padding:5px 11px;font-size:12px;align-items:center;position:relative}
+.trow+.trow::before{content:"";position:absolute;left:11px;right:0;top:0;height:.5px;background:var(--line-2)}
+.trow .p{font-weight:590}.trow.buy .p{color:var(--up)}.trow.sell .p{color:var(--down)}
+.trow .side{font-size:10px;font-weight:640;text-transform:uppercase}
+.trow.buy .side{color:var(--up)}.trow.sell .side{color:var(--down)}
+.trow .t{color:var(--ink-3);text-align:right}
+.trow.big{background:var(--flat-soft);box-shadow:inset 2px 0 0 var(--flat)}
+
+/* charts ------------------------------------------------------------------- */
+.chart{width:100%;height:auto;display:block;max-height:min(46vh,400px)}
+#amdChart{max-height:none}
+.chart-foot{display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap;margin-top:10px;font-size:11px;color:var(--ink-3)}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center}
+.legend .lg{display:inline-flex;align-items:center;gap:6px;white-space:nowrap;font-size:11px;color:var(--ink-2);font-weight:500}
+.swatch{width:12px;height:3px;border-radius:2px;display:inline-block;flex:none}
+
+/* projection --------------------------------------------------------------- */
+.projbar{position:relative;height:56px;margin:20px 0 6px}
+.projtrack{position:absolute;top:24px;left:0;right:0;height:6px;border-radius:99px;background:var(--fill-2)}
+.projfill{position:absolute;top:24px;height:6px;border-radius:99px;background:var(--accent);opacity:.5}
+.projmark{position:absolute;top:14px;width:2px;height:26px;background:var(--ink);border-radius:2px}
+.projmark::after{content:attr(data-l);position:absolute;top:-18px;left:50%;transform:translateX(-50%);font-size:11.5px;font-weight:590;white-space:nowrap}
+.projends{display:flex;justify-content:space-between;font-size:12px;color:var(--ink-3)}
+.scen{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;margin-top:14px}
+.scen .c{background:var(--fill);border-radius:var(--r-md);padding:12px;text-align:center}
+.scen .c .t{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+.scen .c .p{font-size:19px;font-weight:600;margin:4px 0 1px;letter-spacing:-.02em}
+.scen .c .d{font-size:11px;color:var(--ink-3)}
+.scen .bull .t,.scen .bull .p{color:var(--up)}.scen .base .t{color:var(--flat)}.scen .bear .t,.scen .bear .p{color:var(--down)}
+
+/* news --------------------------------------------------------------------- */
+.senti-row{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.senti-row .val{font-size:15px;font-weight:600;margin-left:auto}
+.senti-row .val.up{color:var(--up)}.senti-row .val.down{color:var(--down)}.senti-row .val.flat{color:var(--flat)}
+.meter{height:4px;border-radius:99px;background:var(--down-soft);overflow:hidden;display:flex;flex:1 1 auto;max-width:150px}
+.meter .m-up{background:var(--up)}.meter .m-fl{background:var(--flat)}
+.keys{display:flex;gap:12px;font-size:11px;color:var(--ink-3)}
+.keys span{display:inline-flex;align-items:center;gap:4px}
+.kd{width:7px;height:7px;border-radius:2px}.kd.u{background:var(--up)}.kd.d{background:var(--down)}.kd.f{background:var(--flat)}
+.thesis{font-size:12.5px;color:var(--ink-2);line-height:1.5;padding:11px 13px;border-radius:var(--r-md);background:var(--fill)}
+.thesis .badge{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--accent);display:block;margin-bottom:4px}
+.newsitem{display:block;padding:11px 2px;text-decoration:none;color:inherit;position:relative}
+.newsitem+.newsitem::before{content:"";position:absolute;left:0;right:0;top:0;height:.5px;background:var(--line-2)}
+.newsitem:hover .hl{color:var(--accent)}
+.newsitem .meta{display:flex;align-items:center;gap:8px;margin-bottom:3px}
+.newsitem .src{font-size:11px;color:var(--ink-3);font-weight:590;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:45%}
+.newsitem .time{font-size:11px;color:var(--ink-3);margin-left:auto;white-space:nowrap}
+.badge2{font-size:9.5px;font-weight:640;text-transform:uppercase;padding:1.5px 6px;border-radius:99px;flex:none}
+.badge2.up{color:var(--up);background:var(--up-soft)}.badge2.down{color:var(--down);background:var(--down-soft)}
+.badge2.flat{color:var(--ink-3);background:var(--fill)}
+.newsitem .hl{font-size:13px;font-weight:500;line-height:1.38;transition:color .15s}
+.newsitem .rz{font-size:11.5px;color:var(--ink-3);margin-top:3px;font-style:italic}
+.agentbar{display:flex;align-items:center;gap:8px;padding:10px 2px 2px;font-size:11px;color:var(--ink-3)}
+
+/* filings ------------------------------------------------------------------ */
+.fsum{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px;margin-bottom:14px}
+.fl{display:flex;flex-direction:column;border-radius:var(--r-md);overflow:hidden;background:var(--fill)}
+.fr{display:grid;grid-template-columns:minmax(0,1.5fr) auto minmax(0,1fr) auto;gap:10px;align-items:center;
+  padding:10px 13px;text-decoration:none;color:inherit;position:relative}
+.fr+.fr::before{content:"";position:absolute;left:13px;right:0;top:0;height:.5px;background:var(--line-2)}
+.fr .who{font-weight:590;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fr .role{font-size:11px;color:var(--ink-3);font-weight:400}
+.fr .amt{font-size:12.5px;font-weight:590;text-align:right}
+.fr .when{font-size:11px;color:var(--ink-3);text-align:right;white-space:nowrap}
+.pill{font-size:10px;font-weight:640;text-transform:uppercase;padding:2px 8px;border-radius:99px}
+.pill.buy{color:var(--up);background:var(--up-soft)}.pill.sell{color:var(--down);background:var(--down-soft)}
+.pill.other{color:var(--ink-3);background:var(--fill-2)}
+.emptybox{padding:13px;border-radius:var(--r-md);background:var(--fill);font-size:12.5px;color:var(--ink-3);line-height:1.5}
+
+/* backtest / amd ----------------------------------------------------------- */
+.verdict{padding:13px 15px;border-radius:var(--r-md);font-weight:590;font-size:14.5px}
+.verdict.pass{background:var(--up-soft);color:var(--up)}
+.verdict.fail{background:var(--fill);color:var(--ink)}
+.verdict small{display:block;font-weight:400;color:var(--ink-3);margin-top:4px;font-size:12.5px;line-height:1.45}
+.profile{display:flex;align-items:flex-end;gap:4px;height:120px;padding:6px 0 20px}
+.profile .b{flex:1;background:var(--accent);opacity:.55;border-radius:3px 3px 0 0;position:relative;min-height:2px}
+.profile .b b{position:absolute;bottom:-17px;left:0;right:0;text-align:center;font-size:9px;color:var(--ink-3);font-weight:400}
+.profile .b.hot{background:var(--up);opacity:.85}
+.notecard{font-size:12.5px;color:var(--ink-2);line-height:1.5;padding:10px 12px;border-radius:var(--r-md);background:var(--fill);margin-bottom:8px}
+.note{font-size:12.5px;color:var(--ink-2);line-height:1.55}
+.foot{margin-top:16px;padding:14px 18px;font-size:11.5px;color:var(--ink-3);line-height:1.55}
+.foot .discl{padding:10px 12px;border-radius:var(--r-md);background:var(--fill);color:var(--ink-2);margin-bottom:9px}
+
+/* ---------------- responsive ---------------- */
+@media (max-width:1080px){
+  .grid{grid-template-columns:1fr}
+  .hero{grid-template-columns:1fr;gap:18px}
+  .rail{position:static;max-height:none;overflow:visible}
+  .book{grid-template-columns:1fr}
+  .bookcol{max-width:none;margin-left:0!important}
+  /* single column: reorder by importance, news right after the live market */
+  /* align-items:start is right for the desktop GRID, but in a column FLEX the
+     cross axis is horizontal — leaving it there shrink-wraps every section to
+     its content instead of filling the column. */
+  .grid{display:flex;flex-direction:column;gap:12px;align-items:stretch}
+  .grid>main,.rail{display:contents}
+  /* promoted flex items default to min-width:auto, which let the scrolling tab
+     strip push the page wider than the viewport — pin them to the column */
+  .tabwrap,.panel,.hero,#p-research,#s-news{min-width:0;max-width:100%}
+  .tabs{min-width:0}
+  .tabwrap{order:1}#p-amd{order:2}#p-live{order:3}
+  #s-news{order:4}#p-proj{order:5}#p-over{order:6}#p-research{order:7}
+  .top{top:0;border-radius:0 0 16px 16px;margin:-14px calc(-1 * clamp(14px,2.2vw,30px)) 12px;
+    padding-top:calc(10px + env(safe-area-inset-top))}
+  .tabwrap{top:var(--hdr);padding-top:8px}
+  .panel{scroll-margin-top:calc(var(--hdr) + 56px)}
+  .brand{order:0}
+  .hmeta{order:1;width:auto;margin-left:auto}
+  .hprice{order:2;width:100%;max-width:100%;margin-left:0;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;
+    -webkit-mask-image:linear-gradient(90deg,#000 92%,transparent);mask-image:linear-gradient(90deg,#000 92%,transparent)}
+  .hprice::-webkit-scrollbar{display:none}
+}
+@media (max-width:620px){
+  .wrap{padding:10px 12px 30px;padding-left:max(12px,env(safe-area-inset-left));
+    padding-right:max(12px,env(safe-area-inset-right));padding-bottom:calc(30px + env(safe-area-inset-bottom))}
+  .top{margin:-10px -12px 10px;padding:8px 13px;gap:5px 10px;padding-top:calc(8px + env(safe-area-inset-top))}
+  .brand .sub{display:none}
+  .brand h1{font-size:14.5px}
+  .mark{width:28px;height:28px;border-radius:7px}
+  .hprice .px{font-size:21px}
+  .chip{font-size:11.5px;padding:2px 8px}.chip.tiny{font-size:10.5px;padding:1.5px 7px}
+  .status{font-size:9.5px}
+  .tbtn{width:30px;height:30px}
+  .pad,.panel{padding:15px 15px}
+  .hero{padding:16px 15px}
+  .callword{font-size:38px}
+  .tf{padding:7px 3px;border-radius:9px}
+  .tf .t{font-size:9.5px}.tf .w{font-size:10.5px}.tf .r{font-size:9px}
+  /* fixed two-up so nothing is left as a half-width orphan; an odd last tile
+     spans the row instead of floating beside dead space */
+  .tiles{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
+  .tile{padding:10px 11px}.tile .v{font-size:15px}
+  .fsum{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
+  /* everything else runs the full width of the card */
+  .imb,.tape,.projbar,.projends,.scen,.list,.factors,.fl{max-width:none}
+  .exstrip{gap:5px}
+  .expill{flex:1 1 auto;text-align:center}
+  .fr{grid-template-columns:minmax(0,1fr) auto;row-gap:3px}
+  .fr .amt{grid-column:1;text-align:left}.fr .when{grid-column:2}
+  .scen{grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+  .scen .c{padding:10px 6px}
+  .scen .c .p{font-size:15px}
+  .scen .c .t{font-size:10px}
+  .scen .c .d{font-size:10px}
+  .mkthead .big{font-size:22px}
+  .sect-h h3,.fold>summary{font-size:14px}
+  .ipop{max-width:calc(100vw - 20px)}
+  .tab{padding:6px 11px;font-size:12.5px}
+}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+/* ---------------- trade panel ---------------- */
+.tradebtn{appearance:none;border:.5px solid var(--line);background:var(--fill);color:var(--ink);height:32px;border-radius:10px;
+  padding:0 11px;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+.tradebtn:hover{background:var(--accent-soft);color:var(--accent)}
+.tradebtn .st{font-size:10.5px;font-weight:700;padding:1px 6px;border-radius:6px;background:var(--fill-2);color:var(--ink-3)}
+.tradebtn .st.paper{background:var(--accent-soft);color:var(--accent)}
+.tradebtn .st.live{background:var(--down);color:#fff}
+dialog.tp{border:.5px solid var(--line);border-radius:var(--r-lg);background:var(--card-solid);color:var(--ink);
+  width:min(760px,calc(100vw - 32px));max-height:calc(100dvh - 32px);padding:0;box-shadow:var(--shadow)}
+dialog.tp::backdrop{background:rgba(0,0,0,.45)}
+.tp-h{display:flex;align-items:center;gap:10px;padding:16px 18px;border-bottom:.5px solid var(--line);position:sticky;top:0;background:var(--card-solid);z-index:1}
+.tp-h h3{margin:0;font-size:16px}.tp-b{padding:14px 18px 18px;overflow:auto}
+.tp fieldset{border:0;padding:0;margin:0 0 14px}
+.tp legend{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);margin-bottom:8px}
+.tp .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}
+.tp label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--ink-2)}
+.tp input,.tp select{font:inherit;font-size:13px;padding:7px 9px;border-radius:var(--r-sm);border:.5px solid var(--line);background:var(--fill);color:var(--ink);min-width:0}
+.tp .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.tp button.b{appearance:none;font:inherit;font-size:13px;font-weight:600;border-radius:var(--r-sm);padding:8px 13px;cursor:pointer;border:.5px solid var(--line);background:var(--fill);color:var(--ink)}
+.tp button.b.pri{background:var(--accent);color:#fff;border-color:transparent}
+.tp button.b.live{background:var(--down);color:#fff;border-color:transparent}
+.tp button.b:disabled{opacity:.45;cursor:not-allowed}
+.tp .msg{font-size:12.5px;color:var(--ink-2);line-height:1.45}
+.tp .msg.err{color:var(--down)}
+.tp .ev{font-family:ui-monospace,monospace;font-size:11.5px;color:var(--ink-2);max-height:180px;overflow:auto;background:var(--fill);border-radius:var(--r-sm);padding:8px 10px;line-height:1.55}
+
+.hmeta{position:relative}
+.umenu{position:absolute;right:0;top:40px;z-index:30;background:var(--card-solid);border:.5px solid var(--line);border-radius:var(--r-md);box-shadow:var(--shadow);padding:5px;min-width:150px;display:flex;flex-direction:column}
+.umenu[hidden]{display:none}
+.umenu button{appearance:none;border:0;background:transparent;color:var(--ink);font:inherit;font-size:13px;text-align:left;padding:8px 10px;border-radius:8px;cursor:pointer}
+.umenu button:hover{background:var(--fill)}
+.perf-hero{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin:2px 0 10px}
+.perf-hero .big{font-size:clamp(30px,5vw,40px);font-weight:650;letter-spacing:-.03em;font-variant-numeric:tabular-nums}
+.perf-hero .up{color:var(--up)}.perf-hero .down{color:var(--down)}
+.segm{display:inline-flex;background:var(--fill);border-radius:9px;padding:2px}
+.segm button{appearance:none;border:0;background:transparent;font:inherit;font-size:12px;font-weight:600;color:var(--ink-3);padding:4px 11px;border-radius:7px;cursor:pointer}
+.segm button[aria-pressed="true"]{background:var(--card-solid);color:var(--ink);box-shadow:0 0 0 .5px var(--line)}
+.pcurve{width:100%;height:120px;display:block}
+.ptip{position:absolute;pointer-events:none;background:var(--card-solid);border:.5px solid var(--line);border-radius:8px;padding:4px 8px;font-size:11.5px;box-shadow:var(--shadow);white-space:nowrap}
+.tp details.adv>summary{cursor:pointer;font-size:12.5px;font-weight:600;color:var(--accent);padding:4px 0}
+.tp table.rt{width:100%;border-collapse:collapse;font-size:12.5px}
+.tp table.rt td,.tp table.rt th{padding:6px 4px;border-bottom:.5px solid var(--line-2);text-align:left}
+.tp table.rt th{font-size:11px;color:var(--ink-3);font-weight:600}
+.tp table.rt td.n{text-align:right;font-variant-numeric:tabular-nums}
+.tp .note-viewer{font-size:12px;color:var(--ink-3)}
+
+
+.tp-page{display:flex;flex-direction:column;gap:12px;margin-top:12px}
+.tp-page>section{padding:16px 18px}
+.tp-page fieldset{margin:0}
+.tp-page .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:9px}
+.tp .sect-title{display:flex;align-items:center;gap:10px;margin:0 0 10px}
+.tp .sect-title h2{font-size:15px;margin:0}
+[hidden]{display:none!important}
+.top .hmeta{margin-left:auto}
+.pempty{position:absolute;inset:0;display:grid;place-items:center;font-size:13px;color:var(--ink-3)}
+a.navlink{font-size:13px;font-weight:600;color:var(--accent);text-decoration:none}
+
+
+/* ---------------- touch screens (phones, tablets): finger-sized targets, no iOS zoom ---------------- */
+@media (pointer:coarse){
+  input,select,textarea{font-size:16px!important}
+  .tbtn{width:40px;height:40px}
+  .tradebtn{height:40px;padding:0 13px}
+  .tab{min-height:40px;padding:8px 14px}
+  .seg button{min-height:40px;padding:0 14px}
+  .mini>summary,.fold>summary,details>summary{min-height:44px;display:flex;align-items:center}
+  .umenu a,.umenu button{min-height:44px;display:flex;align-items:center}
+  a.navlink{display:inline-block;padding:10px 0}
+}
+@media (pointer:coarse){
+  .tp button.b{min-height:44px;padding:0 16px}
+  .segm button{min-height:40px;padding:0 16px}
+  .tp input,.tp select{min-height:44px}
+  details.adv>summary{min-height:44px}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="brand">
+      <div class="mark"><svg viewBox="0 0 24 24" fill="none"><path d="M12 2L3 12l9 10 9-10L12 2z" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/><path d="M12 6l-5 6 5 6 5-6-5-6z" fill="#fff" fill-opacity=".92"/></svg></div>
+      <div><h1>PLTR Trading</h1><div class="sub">Opening range breakout · US open <span id="openEat">16:30</span> EAT · <a class="navlink" href="/">← Dashboard</a></div></div>
+    </div>
+    <div class="hmeta">
+      <span class="chip tiny" id="tpMode">stopped</span>
+      <button class="tbtn" id="setBtn" type="button" title="Settings: exchange API keys" aria-label="Settings">⚙</button>
+      <button class="tradebtn" id="userBtn" type="button" aria-haspopup="menu"><span id="userName">—</span> ▾</button>
+      <div class="umenu" id="userMenu" role="menu" hidden>
+        <a role="menuitem" href="/">Dashboard</a>
+        <button type="button" role="menuitem" id="umLogout">Sign out</button>
+      </div>
+      <button class="tbtn" id="themeBtn" title="Toggle appearance" aria-label="Toggle appearance">◐</button>
+    </div>
+  </header>
+
+  <div class="tp tp-page">
+    <div class="msg err card" id="tpErr" style="padding:10px 14px" hidden></div>
+
+    <section class="card">
+      <div class="sect-title"><h2>Profitability</h2>
+        <div class="segm" id="perfSeg" role="group" aria-label="Which results"><button type="button" data-m="paper" aria-pressed="true">Paper</button><button type="button" data-m="live" aria-pressed="false">Live</button></div>
+        <span class="msg" id="perfNote"></span></div>
+      <div class="perf-hero"><span class="big mono" id="perfTotal">$0.00</span><span class="msg" id="perfSub"></span></div>
+      <div class="tiles" id="perfTiles"></div>
+      <div style="position:relative;margin-top:10px">
+        <svg class="pcurve" id="perfCurve" viewBox="0 0 600 120" preserveAspectRatio="none" role="img" aria-label="Cumulative profit per trade"></svg>
+        <div class="ptip" id="perfTip" hidden></div>
+        <div class="pempty" id="perfEmpty" hidden>The profit curve appears after two trades</div>
+      </div>
+      <table class="rt" id="perfRecent" style="margin-top:8px"></table>
+    </section>
+
+    <section class="card">
+      <div class="sect-title"><h2>Run</h2><span class="msg" id="tpNow"></span></div>
+      <div class="row">
+        <button class="b pri" type="button" id="tpPaper">Start paper</button>
+        <button class="b live" type="button" id="tpLive">Go live…</button>
+        <button class="b" type="button" id="tpStop">Stop &amp; flatten</button>
+      </div>
+      <p class="msg" style="margin:8px 0 0">Paper uses the live order book and simulates fills with fees and slippage, and keeps running after restarts. Live sends real orders with your saved keys and must be armed each day.</p>
+      <div class="sect-title" style="margin-top:14px"><h2 style="font-size:13px">Exit style</h2></div>
+      <div class="row" id="tpPresets"></div>
+      <p class="msg" id="tpPresetNote" style="margin:6px 0 0"></p>
+      <details class="adv" style="margin-top:10px"><summary>Strategy details</summary>
+        <div class="grid2" style="margin-top:8px">
+          <label>Leverage (x)<input id="c-leverage" type="number" min="1" max="20" step="1"></label>
+          <label>Batch margin per trade (USDT)<input id="c-batchUsd" type="number" min="0" step="10"></label>
+          <label>Paper starting capital (USDT)<input id="c-paperEquity" type="number" min="10" step="100"></label>
+          <label>Max trades per session<input id="c-maxTrades" type="number" min="1" max="10" step="1"></label>
+          <label>First target, net (USDT)<input id="c-takeProfitUsd" type="number" min="0" step="0.1"></label>
+          <label>Bank at first target (%)<input id="c-partialPct" type="number" min="0" max="100" step="10"></label>
+          <label>Trail the rest (% behind best)<input id="c-trailPct" type="number" min="0" max="2" step="0.01"></label>
+          <label>Break-even lock after (USDT)<input id="c-breakevenUsd" type="number" min="0" step="0.1"></label>
+          <label>Stop type<select id="c-stopMode"><option value="range">Part of opening range</option><option value="usd">Fixed $ loss</option><option value="hard">Emergency stop only</option></select></label>
+          <label>Range stop (x range width)<input id="c-rangeStopFrac" type="number" min="0.1" max="2" step="0.1"></label>
+          <label>$ stop per batch, incl. fees<input id="c-stopLossUsd" type="number" min="0" step="0.1"></label>
+          <label>Ignore stop after entry (s)<input id="c-graceSec" type="number" min="0" max="60" step="1"></label>
+          <label>Stop must hold (ms)<input id="c-confirmMs" type="number" min="0" max="5000" step="100"></label>
+          <label>Emergency stop, always on (%)<input id="c-hardStopPct" type="number" min="0.2" max="5" step="0.1"></label>
+          <label>Wait after an exit (s)<input id="c-reentrySec" type="number" min="0" max="300" step="1"></label>
+          <label>Opening range (min)<input id="c-orbMinutes" type="number" min="1" max="15" step="1"></label>
+          <label>Close all after (min)<input id="c-exitAfterMin" type="number" min="5" max="390" step="5"></label>
+          <label>Breakout buffer (%)<input id="c-bufferPct" type="number" min="0" max="1" step="0.01"></label>
+          <label>Book lean needed (%)<input id="c-imbalanceMin" type="number" min="50" max="90" step="1"></label>
+          <label>Daily loss stop (% equity)<input id="c-dailyLossPct" type="number" min="0.5" max="20" step="0.5"></label>
+          <label>Max position (USDT)<input id="c-maxNotional" type="number" min="10" step="100"></label>
+          <label>Fee per side % (-1 = 0.06%)<input id="c-takerFeePct" type="number" min="-1" max="1" step="0.01"></label>
+          <label>Book checks per second<input id="c-tickHz" type="number" min="5" max="20" step="1"></label>
+          <label>Max orders per second<input id="c-maxOrdersPerSec" type="number" min="1" max="20" step="1"></label>
+          <label>Paper market data<select id="c-exchange"><option value="bybit">Bybit</option><option value="binanceusdm">Binance futures</option></select></label>
+        </div>
+        <div class="row" style="margin-top:9px"><button class="b" type="button" id="tpSaveCfg">Save</button><span class="msg" id="tpCfgMsg"></span></div>
+      </details>
+    </section>
+
+    <section class="card">
+      <div class="sect-title"><h2>Now</h2></div>
+      <div class="tiles" id="tpTiles"></div>
+      <details class="adv" style="margin-top:10px"><summary>Activity log</summary><div class="ev" id="tpEvents" style="margin-top:6px">No activity yet.</div></details>
+    </section>
+
+    <footer class="foot card"><div class="discl"><b>Not financial advice.</b> Leveraged trading can lose more than a batch quickly. Paper-trade first.</div></footer>
+  </div>
+</div>
+
+<dialog class="tp" id="setDlg" aria-labelledby="setTitle">
+  <div class="tp-h"><h3 id="setTitle">Settings · exchange API keys</h3>
+    <div class="sp" style="flex:1"></div><button class="tbtn" type="button" id="setClose" aria-label="Close">✕</button></div>
+  <div class="tp-b">
+    <div class="msg err" id="setErr" hidden></div>
+    <fieldset><legend>Saved keys</legend><p class="msg" id="tpKeyMsg">—</p></fieldset>
+    <fieldset><legend>Connect an exchange</legend>
+      <div class="grid2">
+        <label>Exchange<select id="k-exchange"><option value="bybit">Bybit</option><option value="binanceusdm">Binance futures (USDⓈ-M)</option><option value="okx">OKX</option><option value="bitget">Bitget</option></select></label>
+        <label>API key<input id="k-apiKey" autocomplete="off" spellcheck="false"></label>
+        <label>Secret<input id="k-secret" type="password" autocomplete="off"></label>
+        <label>Passphrase (OKX/Bitget only)<input id="k-password" type="password" autocomplete="off"></label>
+      </div>
+      <div class="row" style="margin-top:10px"><button class="b pri" type="button" id="tpSaveKeys">Save &amp; test</button>
+        <button class="b" type="button" id="tpClearKeys">Delete keys</button></div>
+      <p class="msg" style="margin:10px 0 0">Keys are encrypted the moment you save them and stay linked to your account. They are never shown again, only a masked form. Create them with <b>trading only, withdrawals off</b>, restricted to the server's IP.</p>
+    </fieldset>
+  </div>
+</dialog>
+
+<script>
+const $=(s,r=document)=>r.querySelector(s),$$=(s,r=document)=>[...r.querySelectorAll(s)];
+const esc=s=>(s??"").toString().replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+(function(){const root=document.documentElement,b=$("#themeBtn");
+  try{const s=localStorage.getItem("pltr-theme");if(s)root.setAttribute("data-theme",s);}catch(e){}
+  b.onclick=()=>{const c=root.getAttribute("data-theme");const d=c?c==="dark":matchMedia("(prefers-color-scheme: dark)").matches;
+    const n=d?"light":"dark";root.setAttribute("data-theme",n);try{localStorage.setItem("pltr-theme",n);}catch(e){}};})();
+async function jfetch(path,method="GET",body){
+  const r=await fetch(path,{method,cache:"no-store",headers:{"Content-Type":"application/json"},body:body?JSON.stringify(body):undefined});
+  let j={};try{j=await r.json();}catch(e){}
+  if(r.status===401){location.href="/login";throw new Error("sign in required");}
+  if(!r.ok)throw Object.assign(new Error(j.detail||("HTTP "+r.status)),{status:r.status});
+  return j;
+}
+$("#userBtn").onclick=e=>{e.stopPropagation();$("#userMenu").hidden=!$("#userMenu").hidden;};
+document.addEventListener("click",e=>{if(!e.target.closest("#userMenu"))$("#userMenu").hidden=true;});
+$("#umLogout").onclick=async()=>{try{await jfetch("/api/logout","POST",{});}catch(e){}location.href="/login";};
+/* ---------- trading panel ---------- */
+const TP={st:null,view:null};
+const tapi=(p,m,b)=>jfetch("/api/trade/"+p,m,b);
+function errBox(id,m){const e=$(id);e.hidden=!m;e.textContent=m||"";}
+const CFG_KEYS=["leverage","batchUsd","paperEquity","maxTrades","takeProfitUsd","partialPct","trailPct","breakevenUsd","stopMode","rangeStopFrac","stopLossUsd","graceSec","confirmMs","hardStopPct","reentrySec","orbMinutes","exitAfterMin","bufferPct","imbalanceMin","dailyLossPct","maxNotional","takerFeePct","tickHz","maxOrdersPerSec","exchange"];
+function fillCfg(c){CFG_KEYS.forEach(k=>{const el=$("#c-"+k);if(el&&c[k]!=null)el.value=c[k];});}
+const usd=v=>v==null?"–":(v<0?"−$":"$")+Math.abs(v).toFixed(2);
+const sgnCls=v=>v>0?"up":v<0?"down":"";
+async function tpPull(){
+  try{const st=await tapi("status");TP.st=st;renderTrade(st);}catch(e){}
+}
+function renderTrade(st){
+  const m=st.mode;
+  // results follow the running mode; when stopped, the last mode used (switchable)
+  if(m!=="off"||!TP.view)TP.view=m!=="off"?m:(st.view||"paper");
+  $$("#perfSeg button").forEach(x=>{x.setAttribute("aria-pressed",String(x.dataset.m===TP.view));x.disabled=m!=="off"&&x.dataset.m!==m;});
+  renderPerf((st.performance||{})[TP.view]||{},TP.view,m);
+  const mc=$("#tpMode");mc.textContent=m==="live"?"LIVE · real money":m==="paper"?"paper running":"stopped";mc.className="chip tiny "+(m==="live"?"down":m==="paper"?"flat":"");
+  $("#openEat").textContent=st.openEAT||"16:30";$("#userName").textContent=st.user||"—";
+  {
+    const run=m!=="off";$("#tpPaper").disabled=run;$("#tpLive").disabled=run;$("#tpStop").disabled=!run;$("#tpSaveCfg").disabled=run;
+    $("#tpNow").textContent=st.error?"":run?`${st.phase}`:"";
+    if(st.config&&!TP.cfgLoaded){fillCfg(st.config);TP.cfgLoaded=true;}
+    $("#tpPresets").innerHTML=Object.entries(st.presets||{}).map(([k,v])=>`<button class="b" type="button" data-preset="${k}" title="${esc(v.note)}" ${run?"disabled":""}>${esc(v.label)}</button>`).join("");
+    errBox("#tpErr",st.error||"");
+  }
+  const p=st.position,r=st.range,s=st.stats||{};
+  const t=[["Phase",st.phase||"stopped",st.symbol||"PLTR perp"],
+    ["Opening range",r&&r.high!=null?`${(+r.low).toFixed(2)} – ${(+r.high).toFixed(2)}`:"–",""],
+    ["Position",p?`${p.side.toUpperCase()} ${(+p.qty).toFixed(3)}`:"flat",p?`@ ${(+p.entry).toFixed(2)}`+(p.tp1?" · trailing":""):`${st.tradesToday||0} trades today`],
+    ["Open P&L",usd(st.unrealized||0),`speed ${s.checksPerSec||0} checks/s`],
+    ["AI market risk",(st.plan&&st.plan.ai&&st.plan.ai.marketRisk)||"normal",(st.plan&&st.plan.ai&&st.plan.ai.reason)||"supervisor wakes 30 min before the open"]];
+  $("#tpTiles").innerHTML=t.map(x=>`<div class="tile"><div class="k">${x[0]}</div><div class="v mono" style="font-size:14px">${esc(String(x[1]))}</div><div class="x">${esc(String(x[2]))}</div></div>`).join("");
+  const ev=(st.events||[]).slice().reverse();
+  $("#tpEvents").innerHTML=ev.length?ev.map(e=>`<div>${esc(e.at.slice(11,19))}Z ${esc(e.msg)}</div>`).join(""):"No activity yet.";
+}
+function renderPerf(pf,view,mode){
+  const tot=pf.total||0;
+  const T=$("#perfTotal");T.textContent=usd(tot);T.className="big mono "+sgnCls(tot);
+  $("#perfSub").textContent=pf.trades?`${view==="live"?"live":"paper"} · ${pf.returnPct!=null?(pf.returnPct>0?"+":"")+pf.returnPct+"% on "+usd(pf.capital):""} · ${pf.sessions} session${pf.sessions===1?"":"s"}`:`no ${view} trades yet`;
+  $("#perfNote").textContent=mode!=="off"?`showing ${mode} (running)`:"";
+  const tiles=[["Today",usd(pf.today),`${pf.todayTrades||0} trades`],["Win rate",pf.winRate!=null?pf.winRate+"%":"–",`${pf.wins||0} of ${pf.trades||0}`],
+    ["Per trade",usd(pf.avg),"average, after fees"],["Best / worst",pf.trades?`${usd(pf.best)} / ${usd(pf.worst)}`:"–",""]];
+  $("#perfTiles").innerHTML=tiles.map(x=>`<div class="tile"><div class="k">${x[0]}</div><div class="v mono" style="font-size:15px">${esc(x[1])}</div><div class="x">${esc(x[2])}</div></div>`).join("");
+  drawCurve(pf.curve||[]);
+  const rc=pf.recent||[];
+  $("#perfRecent").innerHTML=rc.length?`<tr><th>Day</th><th>Side</th><th class="n">P&amp;L</th></tr>`+rc.map(t=>`<tr><td>${esc(t.day||"")}</td><td>${esc(t.side||"")}</td><td class="n ${sgnCls(t.pnl)}" style="color:var(--${t.pnl>0?"up":t.pnl<0?"down":"ink-2"})">${usd(t.pnl)}</td></tr>`).join(""):"";
+}
+function drawCurve(c){
+  const S=$("#perfCurve");TP.curve=c;
+  $("#perfEmpty").hidden=c.length>=2;
+  if(c.length<2){S.innerHTML="";return;}
+  const W=600,H=120,pad=8,lo=Math.min(0,...c),hi=Math.max(0,...c),sp=(hi-lo)||1;
+  const x=i=>pad+i/(c.length-1)*(W-2*pad),y=v=>pad+(1-(v-lo)/sp)*(H-2*pad);
+  const d=c.map((v,i)=>(i?"L":"M")+x(i).toFixed(1)+" "+y(v).toFixed(1)).join(" ");
+  S.innerHTML=`<line x1="${pad}" x2="${W-pad}" y1="${y(0)}" y2="${y(0)}" stroke="var(--grid)" stroke-width="1"/>`
+    +`<path d="${d}" fill="none" stroke="var(--accent)" stroke-width="2" vector-effect="non-scaling-stroke" stroke-linejoin="round"/>`
+    +`<line id="pcX" y1="0" y2="${H}" stroke="var(--ink-3)" stroke-width="1" vector-effect="non-scaling-stroke" visibility="hidden"/>`;
+}
+$("#perfCurve").addEventListener("mousemove",e=>{const c=TP.curve||[];if(c.length<2)return;
+  const r=e.currentTarget.getBoundingClientRect(),f=(e.clientX-r.left)/r.width,i=Math.max(0,Math.min(c.length-1,Math.round(f*(c.length-1))));
+  const X=8+i/(c.length-1)*584;const l=$("#pcX");if(l){l.setAttribute("x1",X);l.setAttribute("x2",X);l.setAttribute("visibility","visible");}
+  const tip=$("#perfTip");tip.hidden=false;tip.textContent=`trade ${i+1}: ${usd(c[i])} total`;
+  tip.style.left=Math.min(r.width-120,Math.max(0,e.clientX-r.left+10))+"px";tip.style.top="4px";});
+$("#perfCurve").addEventListener("mouseleave",()=>{$("#perfTip").hidden=true;const l=$("#pcX");if(l)l.setAttribute("visibility","hidden");});
+$("#perfSeg").addEventListener("click",e=>{const b=e.target.closest("button[data-m]");if(!b||b.disabled)return;TP.view=b.dataset.m;if(TP.st)renderTrade(TP.st);});
+
+const act=(fn,box="#tpErr")=>async()=>{errBox(box,"");try{await fn();}catch(e){errBox(box,e.message);}tpPull();};
+$("#tpPresets").addEventListener("click",e=>{const b=e.target.closest("button[data-preset]");if(!b)return;
+  act(async()=>{const r=await tapi("preset","POST",{name:b.dataset.preset});fillCfg(r.config);
+    const n=((TP.st&&TP.st.presets)||{})[b.dataset.preset];$("#tpPresetNote").textContent=n?`${n.label}: ${n.note}`:"";})();});
+$("#tpSaveCfg").onclick=act(async()=>{const cfg={};CFG_KEYS.forEach(k=>{const el=$("#c-"+k);if(el)cfg[k]=el.value;});
+  const r=await tapi("config","POST",cfg);fillCfg(r.config);$("#tpCfgMsg").textContent="saved";});
+$("#tpPaper").onclick=act(()=>tapi("start","POST",{mode:"paper"}));
+$("#tpLive").onclick=act(async()=>{const c=(TP.st&&TP.st.config)||{};
+  const typed=prompt(`REAL MONEY. ${c.leverage}x leverage, $${c.batchUsd} margin per trade, up to ${c.maxTrades} trades, daily loss stop ${c.dailyLossPct}%.\nType LIVE to arm for today's session:`);
+  if(typed!=="LIVE")throw new Error("not armed (you must type LIVE)");
+  await tapi("start","POST",{mode:"live",confirm:"LIVE"});});
+$("#tpStop").onclick=act(()=>tapi("stop","POST",{}));
+
+/* ---------- settings: API keys only ---------- */
+function renderKeys(k){
+  $("#tpKeyMsg").textContent=k?`${k.exchange} · ${k.apiKey} · `+(k.validated?(k.validated.ok?`working, balance ${k.validated.usdt??"?"} USDT`:`NOT working: ${k.validated.error}`):"not tested"):"No keys connected. Paper trading does not need any.";
+}
+$("#setBtn").onclick=async()=>{errBox("#setErr","");$("#setDlg").showModal();try{renderKeys((await tapi("status")).keys);}catch(e){errBox("#setErr",e.message);}};
+$("#setClose").onclick=()=>$("#setDlg").close();
+$("#tpSaveKeys").onclick=act(async()=>{$("#tpKeyMsg").textContent="testing…";
+  const r=await tapi("keys","POST",{exchange:$("#k-exchange").value,apiKey:$("#k-apiKey").value,secret:$("#k-secret").value,password:$("#k-password").value});
+  $("#k-secret").value="";$("#k-password").value="";$("#k-apiKey").value="";renderKeys(r.keys);},"#setErr");
+$("#tpClearKeys").onclick=act(async()=>{const r=await tapi("keys","DELETE",{});renderKeys(r.keys);},"#setErr");
+
+
+if(location.hash==="#settings")$("#setBtn").click();
+tpPull();setInterval(tpPull,1000);
+</script>
+</body>
+</html>

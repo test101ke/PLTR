@@ -7,6 +7,13 @@ services:
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /healthz
+    # Accounts, keys and results live in DATA_DIR. Render wipes the service's own
+    # disk on every deploy, so attach a persistent disk (paid plans only) or they
+    # are lost each time. Uncomment after moving to a paid plan:
+    # disk:
+    #   name: desk-data
+    #   mountPath: /var/data
+    #   sizeGB: 1
     autoDeploy: true
     envVars:
       - key: PYTHON_VERSION
@@ -19,8 +26,14 @@ services:
         value: claude-opus-5-5
       - key: SEC_UA             # "Your Name your@email"; SEC blocks anonymous requests
         sync: false
-      - key: TRADE_TOKEN        # password for the Trade panel; required on a public host
+      - key: KEYS_SECRET        # encrypts saved exchange API keys; set once, never change (changing it makes saved keys unreadable)
+        generateValue: true
+      - key: SESSION_SECRET     # signs sign-in cookies
+        generateValue: true
+      - key: SIGNUP_CODE        # optional: friends need this code to create an account
         sync: false
+      - key: DATA_DIR           # accounts, encrypted keys, trade history
+        value: /var/data
       - key: X_BEARER_TOKEN      # optional: X/Twitter buzz
         sync: false
       - key: LARGE_TRADE_USD

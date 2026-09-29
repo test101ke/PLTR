@@ -30,9 +30,8 @@ Env vars (all optional except where noted):
 import os, asyncio, time, math, json, contextlib, datetime as dt
 from typing import Any, Optional
 import httpx
-import hmac
 from fastapi import FastAPI, Request, HTTPException, Depends
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi.responses import JSONResponse, FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 import backtest as bt
 import exchanges as ex
@@ -42,6 +41,7 @@ import google_news
 import filings as filinglib
 import signal_log
 import engine as engine_mod
+import accounts as accounts_mod
 import trader as trader_mod
 import anthropic
 
@@ -88,7 +88,8 @@ _LIVE = deque(maxlen=1400)   # (epoch_seconds, mark_price) for short-timeframe s
 _ROT = {"i": 0, "live": []}  # rotating exchange price pool
 AMD = {}                     # full AMD / Power-of-3 payload (served at /api/amd)
 engine = engine_mod.Engine()
-trader = trader_mod.TradeAgent(get_ai=lambda: engine.ai)
+ACCOUNTS = accounts_mod.Accounts()
+TRADERS: dict = {}              # username -> that account's TradeAgent
 _AI = anthropic.AsyncAnthropic(api_key=CFG["ANTHROPIC_API_KEY"]) if CFG["ANTHROPIC_API_KEY"] else None
 _GOOGLE: list[dict] = []     # newest Google News scrape, refreshed on its own 5-min loop
 
@@ -1168,11 +1169,13 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(loop(run_supervisor, 1.0, "supervisor")),
         asyncio.create_task(loop(screen_pool, float(os.getenv("SCREEN_INTERVAL", "900")), "screen")),
     ]
+    asyncio.create_task(resume_paper_traders())
     try:
         yield
     finally:
-        if trader.mode != "off":
-            await trader.stop("server shutting down")
+        for t in TRADERS.values():
+            if t.mode != "off":
+                await t.stop("server shutting down")
         for t in tasks:
             t.cancel()
         await _client.aclose()
@@ -1238,19 +1241,43 @@ async def api_backtest_run():
     return {"started": True}
 
 
-# ============================================================ TRADING (ORB, trader.py)
-def trade_guard(request: Request):
-    """Trading endpoints move money. With TRADE_TOKEN set, every call must carry it
-    in X-Trade-Token. Without it, only this machine itself may call them: the desk
-    binds 0.0.0.0, so anyone on the network could otherwise reach them."""
-    token = os.getenv("TRADE_TOKEN", "")
-    if token:
-        if not hmac.compare_digest(request.headers.get("x-trade-token", ""), token):
-            raise HTTPException(403, "trade token required")
-        return
-    host = request.client.host if request.client else ""
-    if host not in ("127.0.0.1", "::1") or request.headers.get("x-forwarded-for"):
-        raise HTTPException(403, "trading is limited to localhost; set TRADE_TOKEN to use it remotely")
+# ============================================================ ACCOUNTS + SIGN-IN (accounts.py)
+SESSION_COOKIE = "desk_session"
+PUBLIC = ("/login", "/api/login", "/api/signup", "/api/me", "/healthz", "/sw.js", "/manifest.webmanifest",
+          "/favicon.ico", "/static/icons/", "/static/manifest.webmanifest")
+
+
+def current_user(request: Request):
+    return ACCOUNTS.user(request.cookies.get(SESSION_COOKIE, ""))
+
+
+def signed_in(request: Request) -> str:
+    u = current_user(request)
+    if not u:
+        raise HTTPException(401, "sign in required")
+    return u
+
+
+def trader_for(name: str):
+    """This account's trader, built on first use from its saved settings and keys."""
+    t = TRADERS.get(name)
+    if t is None:
+        t = trader_mod.TradeAgent(get_ai=lambda: engine.ai, user=name, settings=ACCOUNTS.settings(name))
+        creds = ACCOUNTS.keys(name)
+        if creds:
+            t.keys.set(creds["exchange"], creds["apiKey"], creds["secret"], creds.get("password", ""))
+        TRADERS[name] = t
+    return t
+
+
+async def resume_paper_traders():
+    """Paper traders that were running before a restart pick up again. Live never auto-resumes."""
+    for name in ACCOUNTS.names():
+        if ACCOUNTS.autostart(name) == "paper":
+            try:
+                await trader_for(name).start("paper")
+            except Exception as e:
+                trader_for(name).error = f"could not resume paper trading: {e}"
 
 
 async def _body(request: Request) -> dict:
@@ -1261,64 +1288,170 @@ async def _body(request: Request) -> dict:
 
 
 def _fail(e: Exception):
-    code = 403 if isinstance(e, PermissionError) else 400
-    raise HTTPException(code, str(e))
+    raise HTTPException(403 if isinstance(e, PermissionError) else 400, str(e))
 
 
-@app.get("/api/trade/status", dependencies=[Depends(trade_guard)])
-async def trade_status():
-    return JSONResponse(json.loads(json.dumps(trader.status(), default=str)))
+def _json(obj):
+    return JSONResponse(json.loads(json.dumps(obj, default=str)))
 
 
-@app.post("/api/trade/config", dependencies=[Depends(trade_guard)])
+@app.middleware("http")
+async def require_login(request: Request, call_next):
+    path = request.url.path
+    if request.method not in ("GET", "HEAD") and path.startswith("/api/") \
+            and "application/json" not in request.headers.get("content-type", ""):
+        return JSONResponse({"detail": "JSON body required"}, status_code=415)   # blocks form-based CSRF
+    if not any(path == p or (p.endswith("/") and path.startswith(p)) for p in PUBLIC) and not current_user(request):
+        if path.startswith("/api/"):
+            return JSONResponse({"detail": "sign in required"}, status_code=401)
+        return RedirectResponse("/login", status_code=303)
+    return await call_next(request)
+
+
+def _session(request: Request, token: str):
+    r = JSONResponse({"ok": True})
+    https = request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https"
+    r.set_cookie(SESSION_COOKIE, token, max_age=accounts_mod.SESSION_HOURS * 3600, httponly=True,
+                 samesite="lax", secure=https, path="/")
+    return r
+
+
+def _ip(request: Request):
+    return request.headers.get("x-forwarded-for", "").split(",")[0].strip() or (request.client.host if request.client else "")
+
+
+@app.get("/login")
+async def login_page():
+    return FileResponse(os.path.join(HERE, "static", "login.html"))
+
+
+@app.post("/api/signup")
+async def api_signup(request: Request):
+    b = await _body(request)
+    try:
+        return _session(request, ACCOUNTS.register(b.get("name", ""), b.get("password", ""), b.get("code", "")))
+    except (ValueError, PermissionError) as e:
+        _fail(e)
+
+
+@app.post("/api/login")
+async def api_login(request: Request):
+    b = await _body(request)
+    try:
+        return _session(request, ACCOUNTS.login(b.get("name", ""), b.get("password", ""), _ip(request)))
+    except PermissionError as e:
+        raise HTTPException(401, str(e))
+
+
+@app.post("/api/logout")
+async def api_logout():
+    r = JSONResponse({"ok": True})
+    r.delete_cookie(SESSION_COOKIE, path="/")
+    return r
+
+
+@app.get("/api/me")
+async def api_me(request: Request):
+    return {"name": current_user(request), "accounts": len(ACCOUNTS.users), "maxAccounts": accounts_mod.MAX_USERS,
+            "signupCode": bool(ACCOUNTS.signup_code)}
+
+
+@app.post("/api/account/delete")
+async def api_account_delete(request: Request):
+    name = signed_in(request)
+    try:
+        ACCOUNTS.delete(name, (await _body(request)).get("password", ""))
+    except PermissionError as e:
+        _fail(e)
+    t = TRADERS.pop(name, None)
+    if t and t.mode != "off":
+        await t.stop("account deleted")
+    r = JSONResponse({"ok": True})
+    r.delete_cookie(SESSION_COOKIE, path="/")
+    return r
+
+
+# ============================================================ TRADING (ORB, trader.py), per account
+@app.get("/api/trade/status")
+async def trade_status(request: Request):
+    t = trader_for(signed_in(request))
+    return _json({**t.status(), "user": t.user, "plan": STATE.get("plan") or {},
+                  "keysEncrypted": True, "keysSecretFromEnv": ACCOUNTS.keys_secret_from_env})
+
+
+@app.post("/api/trade/config")
 async def trade_config(request: Request):
+    name = signed_in(request)
     try:
-        return {"config": trader.configure(await _body(request))}
+        cfg = trader_for(name).configure(await _body(request))
     except Exception as e:
         _fail(e)
+    ACCOUNTS.save_settings(name, cfg)
+    return {"config": cfg}
 
 
-@app.post("/api/trade/preset", dependencies=[Depends(trade_guard)])
+@app.post("/api/trade/preset")
 async def trade_preset(request: Request):
+    name = signed_in(request)
     try:
-        return {"config": trader.apply_preset((await _body(request)).get("name", ""))}
+        cfg = trader_for(name).apply_preset((await _body(request)).get("name", ""))
     except Exception as e:
         _fail(e)
+    ACCOUNTS.save_settings(name, cfg)
+    return {"config": cfg}
 
 
-@app.post("/api/trade/keys", dependencies=[Depends(trade_guard)])
+@app.post("/api/trade/keys")
 async def trade_keys(request: Request):
+    name = signed_in(request)
+    t = trader_for(name)
     b = await _body(request)
     if not (b.get("exchange") and b.get("apiKey") and b.get("secret")):
-        raise HTTPException(400, "exchange, apiKey and secret are required")
-    if trader.mode == "live":
+        raise HTTPException(400, "exchange, API key and secret are required")
+    if t.mode == "live":
         raise HTTPException(400, "stop live trading before changing keys")
-    trader.keys.set(b["exchange"], b["apiKey"], b["secret"], b.get("password", ""))
-    await trader.validate_keys()
-    return {"keys": trader.keys.masked()}
+    creds = {"exchange": b["exchange"].strip(), "apiKey": b["apiKey"].strip(), "secret": b["secret"].strip(),
+             "password": (b.get("password") or "").strip()}
+    ACCOUNTS.save_keys(name, creds)                       # encrypted before it touches disk
+    t.keys.set(creds["exchange"], creds["apiKey"], creds["secret"], creds["password"])
+    await t.validate_keys()
+    return {"keys": t.keys.masked()}
 
 
-@app.delete("/api/trade/keys", dependencies=[Depends(trade_guard)])
-async def trade_keys_clear():
-    if trader.mode == "live":
+@app.delete("/api/trade/keys")
+async def trade_keys_clear(request: Request):
+    name = signed_in(request)
+    t = trader_for(name)
+    if t.mode == "live":
         raise HTTPException(400, "stop live trading first")
-    trader.keys.clear()
+    t.keys.clear()
+    ACCOUNTS.clear_keys(name)
     return {"keys": None}
 
 
-@app.post("/api/trade/start", dependencies=[Depends(trade_guard)])
+@app.post("/api/trade/start")
 async def trade_start(request: Request):
+    name = signed_in(request)
     b = await _body(request)
+    mode = b.get("mode", "paper")
     try:
-        return JSONResponse(json.loads(json.dumps(await trader.start(b.get("mode", "paper"), b.get("confirm", "")),
-                                                  default=str)))
+        st = await trader_for(name).start(mode, b.get("confirm", ""))
     except Exception as e:
         _fail(e)
+    ACCOUNTS.set_autostart(name, "paper" if mode == "paper" else None)
+    return _json(st)
 
 
-@app.post("/api/trade/stop", dependencies=[Depends(trade_guard)])
-async def trade_stop():
-    return JSONResponse(json.loads(json.dumps(await trader.stop("kill switch"), default=str)))
+@app.post("/api/trade/stop")
+async def trade_stop(request: Request):
+    name = signed_in(request)
+    ACCOUNTS.set_autostart(name, None)
+    return _json(await trader_for(name).stop("kill switch"))
+
+
+@app.get("/trade")
+async def trade_page():
+    return FileResponse(os.path.join(HERE, "static", "trade.html"))
 
 
 @app.get("/healthz")

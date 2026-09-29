@@ -1,8 +1,8 @@
 /* PLTR Signal Desk service worker.
    Shell is cached so the app opens instantly offline; every /api/ call is
    network-only, because stale market data is worse than no market data. */
-const V = 'pltr-desk-v4';
-const SHELL = ['/', '/static/manifest.webmanifest', '/static/icons/icon-192.png', '/static/icons/icon-512.png'];
+const V = 'pltr-desk-v5';
+const SHELL = ['/static/manifest.webmanifest', '/static/icons/icon-192.png', '/static/icons/icon-512.png'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(V).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()).catch(() => self.skipWaiting()));
@@ -14,9 +14,10 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
   const url = new URL(e.request.url);
   if (e.request.method !== 'GET' || url.origin !== self.location.origin) return;
-  if (url.pathname.startsWith('/api/') || url.pathname === '/healthz') return;   // always live
+  if (url.pathname.startsWith('/api/') || url.pathname === '/healthz' || url.pathname === '/login') return;   // always live
   e.respondWith(
     fetch(e.request).then(r => {
+      if (!r.ok || r.redirected) return r;           // never cache a sign-in redirect or an error
       const copy = r.clone();
       caches.open(V).then(c => c.put(e.request, copy)).catch(() => {});
       return r;

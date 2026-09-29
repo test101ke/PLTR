@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>PLTR Desk sign-in</title>
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="manifest" href="/manifest.webmanifest">
+<style>
+/* ---------------------------------------------------------------------------
+   PLTR Signal Desk — visual system
+   Apple-flavoured: one accent, hairlines instead of boxes, colour only where it
+   carries meaning (up / down), generous air, and a tight type scale.
+   --------------------------------------------------------------------------- */
+:root{
+  --bg:#f5f5f7; --bg-2:#ececf0;
+  --card:rgba(255,255,255,.82); --card-solid:#fff; --fill:rgba(118,118,128,.08); --fill-2:rgba(118,118,128,.12);
+  --line:rgba(60,60,67,.13); --line-2:rgba(60,60,67,.07);
+  --ink:#1d1d1f; --ink-2:#4b4b50; --ink-3:#86868b;
+  --accent:#0071e3; --accent-soft:rgba(0,113,227,.10);
+  --up:#00875a; --up-soft:rgba(0,135,90,.10);
+  --down:#d70015; --down-soft:rgba(215,0,21,.09);
+  --flat:#9a6700; --flat-soft:rgba(154,103,0,.10);
+  --grid:rgba(60,60,67,.10);
+  --bar:rgba(255,255,255,.95);
+  --shadow:0 0 0 .5px rgba(0,0,0,.04), 0 8px 28px -20px rgba(0,0,0,.30);
+  --r-lg:18px; --r-md:12px; --r-sm:9px;
+  --rail:clamp(320px,22vw,400px); --hdr:66px;
+}
+/* true black, not charcoal — cards sit just off the background, separated by a
+   hairline rather than by a lighter grey fill */
+:root[data-theme="dark"]{
+  --bg:#000; --bg-2:#000;
+  --card:rgba(14,14,16,.86); --card-solid:#0e0e10;
+  --fill:rgba(255,255,255,.055); --fill-2:rgba(255,255,255,.09);
+  --line:rgba(255,255,255,.11); --line-2:rgba(255,255,255,.055);
+  --ink:#f5f5f7; --ink-2:#b9b9c0; --ink-3:#78787f;
+  --accent:#0a84ff; --accent-soft:rgba(10,132,255,.16);
+  --up:#30d158; --up-soft:rgba(48,209,88,.14);
+  --down:#ff453a; --down-soft:rgba(255,69,58,.14);
+  --flat:#ffd60a; --flat-soft:rgba(255,214,10,.12);
+  --grid:rgba(255,255,255,.08);
+  --bar:rgba(6,6,8,.95);
+  --shadow:0 0 0 .5px rgba(255,255,255,.05), 0 8px 30px -22px rgba(0,0,0,1);
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 -apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+main{min-height:100dvh;display:grid;place-items:center;padding:16px}
+.card{width:min(380px,100%);background:var(--card-solid);border:.5px solid var(--line);border-radius:var(--r-lg);box-shadow:var(--shadow);padding:24px 22px}
+h1{font-size:20px;margin:0 0 4px}.sub{color:var(--ink-3);font-size:13px;margin:0 0 16px}
+.seg{display:flex;background:var(--fill);border-radius:10px;padding:3px;margin-bottom:16px}
+.seg button{flex:1;appearance:none;border:0;background:transparent;font:inherit;font-size:13px;font-weight:600;color:var(--ink-3);padding:7px;border-radius:8px;cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--card-solid);color:var(--ink);box-shadow:0 0 0 .5px var(--line)}
+label{display:flex;flex-direction:column;gap:5px;font-size:12.5px;color:var(--ink-2);margin-bottom:12px}
+input{font:inherit;font-size:15px;padding:10px 12px;border-radius:10px;border:.5px solid var(--line);background:var(--fill);color:var(--ink)}
+button.go{width:100%;appearance:none;border:0;border-radius:10px;padding:11px;font:inherit;font-weight:650;background:var(--accent);color:#fff;cursor:pointer;margin-top:4px}
+.err{color:var(--down);font-size:13px;min-height:18px;margin:8px 0 0}
+.hint{color:var(--ink-3);font-size:12px;margin:12px 0 0}
+
+@media (pointer:coarse){
+  input{font-size:16px}
+  .seg button{min-height:44px}
+  button.go{min-height:48px}
+}
+</style>
+</head>
+<body>
+<main>
+  <form class="card" id="f" autocomplete="on">
+    <h1>PLTR Desk</h1>
+    <p class="sub" id="sub">Sign in to your account.</p>
+    <div class="seg" role="group" aria-label="Sign in or create an account">
+      <button type="button" data-m="in" aria-pressed="true">Sign in</button>
+      <button type="button" data-m="up" aria-pressed="false">Create account</button>
+    </div>
+    <label>Username<input id="name" name="username" autocomplete="username" required minlength="3" maxlength="32" spellcheck="false"></label>
+    <label>Password<input id="pw" name="password" type="password" autocomplete="current-password" required minlength="8"></label>
+    <label id="codeBox" hidden>Sign-up code<input id="code" autocomplete="off"></label>
+    <button class="go" type="submit" id="go">Sign in</button>
+    <p class="err" id="err" role="alert"></p>
+    <p class="hint" id="hint"></p>
+  </form>
+</main>
+<script>
+const $=s=>document.querySelector(s);let mode="in",ME={};
+try{const t=localStorage.getItem("pltr-theme");if(t)document.documentElement.setAttribute("data-theme",t);}catch(e){}
+function setMode(m){mode=m;document.querySelectorAll(".seg button").forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.m===m)));
+  $("#go").textContent=m==="in"?"Sign in":"Create account";$("#sub").textContent=m==="in"?"Sign in to your account.":"Pick a unique username. Your settings, keys and results stay with it.";
+  $("#pw").autocomplete=m==="in"?"current-password":"new-password";$("#codeBox").hidden=!(m==="up"&&ME.signupCode);$("#err").textContent="";}
+document.querySelector(".seg").onclick=e=>{const b=e.target.closest("button");if(b)setMode(b.dataset.m);};
+fetch("/api/me",{cache:"no-store"}).then(r=>r.json()).then(m=>{ME=m;if(m.name)location.href="/";
+  $("#hint").textContent=`${m.accounts} of ${m.maxAccounts} accounts used.`;if(m.accounts>=m.maxAccounts)document.querySelector('[data-m="up"]').disabled=true;}).catch(()=>{});
+$("#f").onsubmit=async e=>{e.preventDefault();$("#err").textContent="";$("#go").disabled=true;
+  try{const r=await fetch(mode==="in"?"/api/login":"/api/signup",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({name:$("#name").value.trim(),password:$("#pw").value,code:$("#code").value})});
+    const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.detail||"failed");location.href="/";}
+  catch(err){$("#err").textContent=err.message;}finally{$("#go").disabled=false;}};
+</script>
+</body>
+</html>
