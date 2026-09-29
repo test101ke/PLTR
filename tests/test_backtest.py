@@ -80,6 +80,36 @@ def test_news_join():
     assert row["newsNet"] == 3 and row["newsN"] == 5
 
 
+def regime_switch(seed, days=300):
+    """Momentum edge for the first 55% of days, then the same-size reversal edge."""
+    raw = synth(0.0012, seed, days); rnd = random.Random(seed + 99); k = int(len(raw) * 0.55)
+    for i, (day, win, _) in enumerate(raw):
+        if i < k or not win:
+            continue
+        o = int(dt.datetime.combine(day, dt.time(9, 30), tzinfo=NY).timestamp() * 1000)
+        first = 1 if win[o + 2 * 60000][4] > win[o][1] else -1
+        px = win[o + bt.SIG_MIN * 60000][4]
+        for t in sorted(win):
+            if (t - o) // 60000 > bt.SIG_MIN:
+                px *= 1 - first * 0.0012 + rnd.gauss(0, 0.0015)
+                win[t] = [t, px, px, px, px, 1]
+    return raw
+
+
+def test_adaptive_random_never_passes():
+    for seed in range(6):
+        ad = bt.analyse(bt.build_samples(synth(0.0, seed, 300), {}), {})["adaptive"]
+        assert not ad["passed"], f"seed {seed}: adaptive passed on random data"
+
+
+def test_adaptive_follows_regime_switch():
+    for seed in range(3):
+        out = bt.analyse(bt.build_samples(regime_switch(seed), {}), {})
+        ad, fixed = out["adaptive"], out["best"]
+        assert ad["passed"], f"seed {seed}: adaptive missed the new regime"
+        assert ad["test"]["total"] > 0 > fixed["testTotalPct"], "recency weighting should beat the stale fixed rule"
+
+
 if __name__ == "__main__":
     fails = 0
     for name, fn in list(globals().items()):

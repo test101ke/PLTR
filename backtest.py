@@ -39,6 +39,7 @@ Env:  BT_DAYS=200 BT_SIGNAL_MIN=2 BT_WINDOW_MIN=15 BT_FEE_PCT=0.10
 import os, json, math, asyncio, datetime as dt
 from zoneinfo import ZoneInfo
 import httpx
+import adaptive
 try:
     import numpy as np
 except Exception:
@@ -211,6 +212,20 @@ def _fetcher(client, venue, sym, klfn):
     return fetch
 
 
+def is_session(day):
+    return day.weekday() < 5 and day.isoformat() not in NYSE_HOLIDAYS
+
+
+def sessions_through(day, n):
+    """The n NYSE sessions ending on `day` (inclusive), oldest first."""
+    out, d = [], day
+    while len(out) < n:
+        if is_session(d):
+            out.append(d)
+        d -= dt.timedelta(days=1)
+    return out[::-1]
+
+
 def trading_days(n):
     """Last n NYSE sessions before today (New York)."""
     d, out = dt.datetime.now(NY).date() - dt.timedelta(days=1), []
@@ -249,24 +264,28 @@ def open_news_log():
                 except Exception:
                     continue
                 if r.get("kind") == "open_news" and r.get("nyDate"):
-                    out[r["nyDate"]] = {"net": r.get("net", 0), "n": r.get("n", 0)}
+                    net = r["score"] if r.get("score") is not None else r.get("net", 0)
+                    out[r["nyDate"]] = {"net": net, "n": r.get("n", 0)}
     except Exception:
         pass
     return out
 
 
-def build_samples(raw, news):
-    """Turn per-day candle windows into feature rows. Pure: no I/O, easy to test."""
+def build_samples(raw, news, partial=False):
+    """Turn per-day candle windows into feature rows. Pure: no I/O, easy to test.
+    partial=True keeps a day whose exit candle has not printed yet (r_rem=None):
+    that is how the live desk computes today's features at the decision minute."""
     samples, prev_close, prev_prev = [], None, None
     for day, win, close in raw:
         op = dt.datetime.combine(day, dt.time(9, 30), tzinfo=NY)
         o_ms = int(op.timestamp() * 1000)
         cw = {round((t - o_ms) / 60000): r for t, r in win.items()}
         day_close = close[max(close)][4] if close else None
-        if all(k in cw for k in (0, SIG_MIN, WIN_MIN)) and prev_close:
+        need = (0, SIG_MIN) if partial else (0, SIG_MIN, WIN_MIN)
+        if all(k in cw for k in need) and prev_close:
             o0 = cw[0][1]
             pre = cw.get(-1, cw[0])[4]
-            p_sig, p_end = cw[SIG_MIN][4], cw[WIN_MIN][4]
+            p_sig, p_end = cw[SIG_MIN][4], (cw[WIN_MIN][4] if WIN_MIN in cw else None)
             overnight = pre / prev_close - 1
             prev_day = (prev_close / prev_prev - 1) if prev_prev else 0.0
             nw = news.get(day.isoformat())
@@ -276,7 +295,8 @@ def build_samples(raw, news):
                 "day": day.isoformat(),
                 "eat": op.astimezone(EAT).strftime("%H:%M"),
                 "overnight": overnight, "prevDay": prev_day,
-                "r_sig": p_sig / o0 - 1, "r_rem": p_end / p_sig - 1,
+                "r_sig": p_sig / o0 - 1, "r_rem": (p_end / p_sig - 1) if p_end else None,
+                "entry": p_sig,
                 "event": abs(overnight) * 100 >= EVENT_PCT or day.isoformat() in EVENT_DATES,
                 "newsNet": nw["net"] if nw else None, "newsN": nw["n"] if nw else None,
                 "profile": profile})
@@ -388,24 +408,48 @@ def regimes(samples):
 
 
 # ------------------------------------------------------------------ report
+def _passes(hit, n, exp):
+    lo, _ = wilson(round(hit * n), n) if hit is not None and n else (0.0, 0.0)
+    return bool(hit is not None and hit >= 0.70 and lo > 0.50 and n >= MIN_TEST and (exp or 0) > 0), round(lo, 3)
+
+
+def adaptive_study(samples):
+    """Walk forward with recency weights. Half-life picked on train, judged on test."""
+    rules = rule_book()
+    dirs, pnl = adaptive.matrix(samples, rules, FEE_PCT)
+    n, cut = len(samples), int(len(samples) * 0.7)
+    warm = min(40, cut // 2)
+    table = []
+    for hl in adaptive.HALF_LIVES:
+        tr = adaptive.summarize(adaptive.walk(samples, pnl, dirs, rules, hl, warm, cut))
+        te_trades = adaptive.walk(samples, pnl, dirs, rules, hl, cut, n)
+        table.append({"halfLife": hl, "train": tr, "test": adaptive.summarize(te_trades), "_trades": te_trades})
+    ok = [r for r in table if r["train"]["n"] >= MIN_TRAIN // 2 and r["train"]["t"] is not None]
+    chosen = max(ok, key=lambda r: r["train"]["t"]) if ok else None
+    res = {"table": [{k: v for k, v in r.items() if k != "_trades"} for r in table],
+           "halfLife": chosen["halfLife"] if chosen else None, "passed": False}
+    if chosen:
+        te = chosen["test"]
+        res["passed"], res["ciLow"] = _passes(te["hit"], te["n"], te["exp"])
+        res["test"] = te
+        res["recent"] = chosen["_trades"][-10:]
+        ranking = adaptive.rank(pnl, n, chosen["halfLife"], rules)
+        res["ranking"] = ranking[:5]
+        best = adaptive.pick(ranking)
+        res["today"] = best["name"] if best else "stand aside"
+    return res
+
+
 def analyse(samples, meta):
     n = len(samples)
     out = {"generatedAt": dt.datetime.now(dt.timezone.utc).isoformat(), **meta,
            "nDays": n, "signalMin": SIG_MIN, "windowMin": WIN_MIN, "feePct": FEE_PCT,
-           "entryEAT": f"16:30 (EDT) / 17:30 (EST) + {SIG_MIN}m", "exitEAT": f"+{WIN_MIN}m after open",
            "dateRange": [samples[0]["day"], samples[-1]["day"]] if samples else None,
-           "notes": [], "rules": [], "regimes": [], "minuteProfile": [], "best": None,
-           "passed70": False, "equity": [], "recent": []}
+           "notes": [], "rules": [], "regimes": [], "best": None, "passed70": False,
+           "adaptive": None, "samples": [_compact(s) for s in samples[-400:]]}
     if n < 30:
         out["notes"].append(f"Only {n} usable days - too few to judge any rule.")
         return out
-
-    for m in range(1, WIN_MIN + 1):
-        vals = [v for s in samples for mm, v in s["profile"] if mm == m]
-        if vals:
-            out["minuteProfile"].append({"m": m, "avgAbs": sum(abs(v) for v in vals) / len(vals),
-                                         "avgSigned": sum(vals) / len(vals),
-                                         "upShare": sum(1 for v in vals if v > 0) / len(vals)})
 
     rules, train, test = run_rules(samples)
     out["split"] = {"train": [train[0]["day"], train[-1]["day"]], "test": [test[0]["day"], test[-1]["day"]]}
@@ -414,48 +458,38 @@ def analyse(samples, meta):
     eligible = [r for r in rules if r["nTrain"] >= MIN_TRAIN and r["trainT"] is not None]
     if eligible:
         best = max(eligible, key=lambda r: r["trainT"])
-        fn = best["_fn"]
         passes = (best["testHit"] or 0) >= 0.70 and best["ciLow"] > 0.50 and best["nTest"] >= MIN_TEST \
             and (best["expectancy"] or 0) > 0
         out["passed70"] = bool(passes)
-        eq, run = [], 0.0
-        for s in test:
-            d = fn(s)
-            if d:
-                run += d * s["r_rem"] * 100 - FEE_PCT
-                eq.append({"day": s["day"], "cum": round(run, 3)})
-        out["equity"] = eq
-        for s in samples[-15:]:
-            d = fn(s)
-            out["recent"].append({"day": s["day"], "eat": s["eat"], "call": {1: "long", -1: "short", 0: "stand aside"}[d],
-                                  "overnightPct": round(s["overnight"] * 100, 2),
-                                  "prevDayPct": round(s["prevDay"] * 100, 2), "event": s["event"],
-                                  "resultPct": round(d * s["r_rem"] * 100 - FEE_PCT, 3) if d else None})
         out["best"] = {k: v for k, v in best.items() if k != "_fn"}
-        te = best["testHit"]
-        out["notes"].append(
-            f"Chosen on train (best t-stat of net P&L): '{best['name']}'. On the {best['nTest']} held-out days it "
-            f"hit {te*100:.0f}% (95% floor {best['ciLow']*100:.0f}%), net {best['expectancy']:+.3f}% per trade, "
-            f"{best['testTotalPct']:+.2f}% total. " if te is not None else
-            f"Chosen on train: '{best['name']}', but it took no trades in the test period. ")
-        out["notes"].append("CLEARS the bar out-of-sample. Paper-trade it live before real money."
-                            if passes else "Does NOT clear the bar. No reliable open-session edge yet.")
-    else:
-        out["notes"].append(f"No rule reached {MIN_TRAIN} training trades.")
 
+    ad = adaptive_study(samples)
+    out["adaptive"] = ad
+    if ad.get("test"):
+        te = ad["test"]
+        hl = "equal weights" if ad["halfLife"] is None else f"half-life {ad['halfLife']} sessions"
+        out["notes"].append(
+            f"Adaptive ({hl}, chosen on train): {te['n']} test trades, hit "
+            f"{(te['hit'] or 0)*100:.0f}%, net {te['exp'] if te['exp'] is not None else 0:+.3f}% per trade, "
+            f"{te['total']:+.2f}% total. " + ("PASSES." if ad["passed"] else "Does not pass."))
+    b = out["best"]
+    if b and b["testHit"] is not None:
+        out["notes"].append(f"Fixed rule for comparison ('{b['name']}'): {b['nTest']} test trades, hit "
+                            f"{b['testHit']*100:.0f}%, net {b['expectancy']:+.3f}% per trade.")
     logged = sum(1 for s in samples if s["newsNet"] is not None)
-    out["notes"].append(f"News: {logged} of {n} days have a pre-open news snapshot. The news rules only score those days; "
-                        "keep the desk running through the open to build this up.")
-    summer = sum(1 for s in samples if s["eat"] == "16:30")
-    out["notes"].append(f"Clock: {summer} opens at 16:30 EAT, {n - summer} at 17:30 EAT. US clocks go back on "
-                        "1 Nov 2026, so the open moves to 17:30 EAT until 14 Mar 2027.")
+    out["notes"].append(f"News snapshots on {logged} of {n} days; news rules only score those.")
     if samples[-1]["day"] > HOLIDAYS_KNOWN_TO:
         out["notes"].append(f"WARNING: the NYSE holiday list in backtest.py ends {HOLIDAYS_KNOWN_TO}. "
                             "Add later holidays or those days will be scored as fake opens.")
-    out["notes"].append(f"Net of {FEE_PCT}% round-trip fees/slippage. {len(rules)} rules tested; only the "
-                        "train-chosen rule's test result is a fair estimate. The rest are shown for context.")
+    out["notes"].append(f"All results net of {FEE_PCT}% round-trip fees. Open is 16:30 EAT, "
+                        "17:30 EAT from 2 Nov 2026 to 12 Mar 2027.")
     out["rules"] = [{k: v for k, v in r.items() if k != "_fn"} for r in rules]
     return out
+
+
+def _compact(s):
+    """What the live desk needs to keep re-ranking rules as new opens arrive."""
+    return {k: (round(v, 6) if isinstance(v, float) else v) for k, v in s.items() if k != "profile"}
 
 
 def _save(out):
@@ -485,21 +519,19 @@ if __name__ == "__main__":
     if r.get("error"):
         print("ERROR:", r["error"]); raise SystemExit(1)
     print(f"source {r['source']}  days {r['nDays']}  {r['dateRange']}  fee {r['feePct']}%\n")
-    print(f"{'rule (sorted by train t-stat)':62} {'train':>6} {'test':>6} {'n':>4} {'net%/trade':>10}")
-    for x in sorted(r["rules"], key=lambda x: -(x["trainT"] if x["trainT"] is not None else -99)):
-        th = f"{x['trainHit']*100:.0f}%" if x["trainHit"] is not None else "-"
-        te = f"{x['testHit']*100:.0f}%" if x["testHit"] is not None else "-"
-        ex = f"{x['expectancy']:+.3f}" if x["expectancy"] is not None else "-"
-        print(f"{x['name'][:62]:62} {th:>6} {te:>6} {x['nTest']:>4} {ex:>10}")
-    print("\nregimes (follow first-move):")
-    for g in r["regimes"]:
-        h = f"{g['hit']*100:.0f}%" if g["hit"] is not None else "-"
-        mv = f"{g['avgAbsMovePct']}%" if g["avgAbsMovePct"] is not None else "-"
-        print(f"  {g['name']:40} days {g['days']:>4}  hit {h:>4}  avg|move| {mv}")
-    print("\nlast days, chosen rule:")
-    for d in r["recent"]:
-        print(f"  {d['day']} {d['eat']} EAT  overnight {d['overnightPct']:+.2f}%  prev {d['prevDayPct']:+.2f}%"
-              f"{'  EVENT' if d['event'] else ''}  -> {d['call']:11} {d['resultPct'] if d['resultPct'] is not None else ''}")
+    ad = r.get("adaptive") or {}
+    print("adaptive walk-forward (rule re-picked each morning from past days only):")
+    print(f"  {'half-life':>10} {'train n':>8} {'train t':>8} {'test n':>7} {'test hit':>9} {'net%/trade':>11}")
+    for row in ad.get("table", []):
+        tr, te = row["train"], row["test"]
+        hl = "equal" if row["halfLife"] is None else str(row["halfLife"])
+        mark = " <- chosen on train" if row["halfLife"] == ad.get("halfLife") else ""
+        hit = f"{te['hit']*100:.0f}%" if te["hit"] is not None else "-"
+        ex = f"{te['exp']:+.3f}" if te["exp"] is not None else "-"
+        print(f"  {hl:>10} {tr['n']:>8} {str(tr['t']):>8} {te['n']:>7} {hit:>9} {ex:>11}{mark}")
+    print(f"\n  passes: {ad.get('passed')}   today's rule: {ad.get('today')}")
+    for x in ad.get("ranking", []):
+        print(f"    {x['name'][:58]:58} w.hit {x['wHit']*100:.0f}%  w.net {x['wExp']:+.3f}%  t {x['wT']}")
     print()
     for note in r["notes"]:
         print("-", note)

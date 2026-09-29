@@ -6,10 +6,10 @@ It serves one page that live-updates every second with:
 
 - **Tokenized PLTRX** (Bybit primary, Kraken fallback): live order book, buy/sell trade tape, large-order prints, order-book imbalance, 24h volume. This is the crypto-exchange depth data — order book, tape, large orders — for the tokenized Palantir market.
 - **Real NASDAQ PLTR** (Yahoo Finance): price, 20-session chart, 52-week range, volume, 50/200-day moving averages, RSI(14), and fundamentals (P/E, market cap, beta, short interest, analyst targets) where available.
-- **AMD / Power of 3** (`amd.py`): the session model — Asia accumulates a range, London sweeps one side (manipulation), New York expands (distribution). Detects the sweep, the reclaim, the resulting bias, and derives entry / invalidation / T1 / T2 with R:R. Runs on the tokenized PLTR perp, the only PLTR market that trades through Asia and London. Served at `/api/amd`, shown in the "AMD · Power of 3" tab with a session-shaded candle chart, and folded into the composite signal as its own indicator.
+- **AMD / Power of 3** (`amd.py`): the session model — Asia accumulates a range, London sweeps one side (manipulation), New York expands (distribution). Detects the sweep, the reclaim, the resulting bias, and derives entry / invalidation / T1 / T2 with R:R. Runs on the tokenized PLTR perp, the only PLTR market that trades through Asia and London. Served at `/api/amd` only (removed from the dashboard: a 181-day replay found no edge).
 - **AI agent** (Anthropic): scores each news headline bullish/bearish/neutral, writes a short desk read, and feeds a composite **STRONG BUY / SIDEWAYS / STRONG SELL** signal with conviction and a projection band.
 - **Fast news** (`newsfeed.py`): every free real-time source polled **in parallel** and de-duplicated — SEC EDGAR filings, Yahoo Finance, Nasdaq, Seeking Alpha, Google News and StockTwits — so a headline appears the moment any one of them prints it. Default poll is every 8s. (True HFT wires — Bloomberg, Reuters, Dow Jones, Benzinga Pro — are paid commercial products with no open-source equivalent; this is the fastest free stack.) Optional X/Twitter buzz with a bearer token.
-- **Insiders & Congress** (`filings.py`): who else is trading PLTR, from public disclosures — **SEC Form 4** (officers, directors, 10%+ holders, filed within 2 business days, parsed straight from PLTR's EDGAR index at CIK 0001321655) and **STOCK Act** periodic transaction reports from US House and Senate members. Served at `/api/filings`, shown in the "Insiders & Congress" tab.
+- **Insiders & Congress** (`filings.py`): who else is trading PLTR, from public disclosures — **SEC Form 4** (officers, directors, 10%+ holders, filed within 2 business days, parsed straight from PLTR's EDGAR index at CIK 0001321655) and **STOCK Act** periodic transaction reports from US House and Senate members. Served at `/api/filings` only (removed from the dashboard).
 
 > Not financial advice. Tokenized PLTRX is a separate, thinner market that tracks — but can diverge from — the NASDAQ stock, especially outside US hours. Signals are model-derived and can be wrong.
 
@@ -74,7 +74,7 @@ pip install -r requirements.txt
 uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
-The UI is a **white one-pager** — every section (live market, overview, fundamentals, projection, open-window edge, AMD, insiders & congress) is visible on one scroll; the top tabs just jump to a section. A ◐ button toggles a dark theme.
+The UI is a one-pager built around the open trade: **Open plan** first, then market (order book and tape), news, the backtest summary and a 20-session chart. A ◐ button toggles a dark theme.
 
 ## Install it as an app
 
@@ -105,19 +105,25 @@ Three async loops keep a cached `STATE`; the page polls `/api/state` every secon
 
 The PLTRX symbol is **auto-discovered** on startup (scans Bybit/Kraken instruments for `PLTR`). Override with `BYBIT_SYMBOL` / `KRAKEN_PAIR` if needed. All tunables are env vars — see `.env.example` / `render.yaml`.
 
-## Open-session backtest (the 16:30 EAT trade)
+## Open-session trade (16:30 EAT)
 
-`python backtest.py` tests simple rules for trading only the US open, and writes `static/backtest.json` (served at `/api/backtest`, re-run daily by the desk).
+The desk runs one trade: the first 15 minutes after the NASDAQ open. That is **16:30 EAT**, or **17:30 EAT** from 2 Nov 2026 to 12 Mar 2027 (US winter time). NYSE holidays and 13:00 early closes are handled.
 
-- **Clock:** anchored to 09:30 New York. That is **16:30 EAT** while the US is on summer time and **17:30 EAT** from 1 Nov 2026 to 14 Mar 2027. NYSE holidays are skipped and 13:00 early closes handled.
-- **Trade:** decide 2 minutes after the open, exit 15 minutes after. Every trade pays `BT_FEE_PCT` (default 0.10%) round trip.
-- **Daily changes:** each day records the overnight move (prior 15:59 ET close to 09:29 ET) and the prior day's close-to-close change. Rules follow or fade each one.
-- **News:** days with an overnight move of `BT_EVENT_PCT`% or more (default 2.5), or dates in `BT_EVENTS`, count as event days. The live desk also logs a pre-open headline tally at 09:28 ET (`logs/signals.jsonl`, kind `open_news`); the news rules score only the days that have one, so leave the desk running through the open to build that history.
-- **Honest scoring:** oldest 70% of days train, newest 30% test. The headline rule is picked on train (t-stat of net P&L, 30+ trades) and judged on test. It "passes" only with test hit >= 70%, 95% floor > 50%, 20+ test trades and positive net expectancy.
+**Backtest** (`python backtest.py`, re-run daily by the desk, served at `/api/backtest`):
+- Each day records the overnight move, the prior day's change, an event flag (|overnight| >= `BT_EVENT_PCT`%, default 2.5) and the pre-open news score.
+- Rules follow or fade the first 2-minute move, the overnight move, the prior day, or news. Every trade pays `BT_FEE_PCT` (default 0.10%).
+- **Newest days count most.** Each morning the rule is re-picked from past days only, with a day `k` sessions old weighted `0.5^(k/half-life)`. The half-life (10, 20, 40, 80 sessions or equal weights) is chosen on the oldest 70% of days and judged on the newest 30%.
+- It passes only with a 70%+ test hit rate whose 95% floor is above 50%, 20+ test trades, and a profit after fees.
 
-Offline self-test (no internet): `python tests/test_backtest.py`.
+**Live engine** (`engine.py`), two layers:
+- *Fast layer, every second:* ranks rules with the same recency weights, takes the top rule's call 2 minutes after the open, checks a price stop (`GUARD_STOP_PCT`, default 1%) every tick, records the outcome at +15 minutes and immediately re-ranks with it.
+- *AI supervisor (Claude, `SUPERVISOR_MODEL`, default `claude-opus-5-5`):* wakes 30 minutes before the open, on every new headline, after the decision and near the stop (at most every 10s, else every 60s). It can only reduce size, skip the day, move the stop within 0.3% to 1.5%, or exit early. It can never flip direction or add size. Every decision is logged to `logs/signals.jsonl`. It uses server-side refusal fallbacks (`fallbacks: "default"`). Without `ANTHROPIC_API_KEY` the fast layer runs alone.
 
-Research scripts (AMD and timeframe replays) live in `research/`: `python research/replay_long.py 180`.
+**News** (`newsfeed.py` + `google_news.py`): SEC EDGAR (set `SEC_UA` to "Your Name your@email", SEC blocks anonymous requests), Yahoo, Nasdaq, Seeking Alpha and Google News. Reworded copies of one story are folded together and count more the more outlets carry them. StockTwits is shown but never counted. The score halves every 6 hours of age. Each source's health is shown under the news feed.
+
+**Tests** (offline, no internet): `python tests/test_backtest.py`, `python tests/test_engine.py`, `python tests/test_news.py`.
+
+Research scripts (AMD and timeframe replays) live in `research/`.
 
 ## Endpoints
 - `/` dashboard · `/api/state` full JSON state · `/api/amd` AMD payload · `/api/filings` insiders + congress · `/api/backtest` edge study · `/healthz` health check.

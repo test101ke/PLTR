@@ -14,6 +14,10 @@ services:
         sync: false
       - key: AI_MODEL
         value: claude-haiku-4-5-20251001
+      - key: SUPERVISOR_MODEL   # AI supervisor for the open trade
+        value: claude-opus-5-5
+      - key: SEC_UA             # "Your Name your@email"; SEC blocks anonymous requests
+        sync: false
       - key: X_BEARER_TOKEN      # optional: X/Twitter buzz
         sync: false
       - key: LARGE_TRADE_USD
