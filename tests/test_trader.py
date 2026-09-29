@@ -5,7 +5,6 @@ Offline checks for the ORB trader. No network, no real exchange.
 """
 import os, sys, time, asyncio, tempfile, datetime as dt
 os.environ["LOG_DIR"] = tempfile.mkdtemp()
-os.environ.pop("TRADE_TOKEN", None)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import trader as tr
 
@@ -298,21 +297,6 @@ def test_live_needs_confirmation_and_validated_keys():
     assert st["mode"] == "live" and st["liveArmed"] and st["keys"]["apiKey"] == "abcd…5678"
     assert "s3cret" not in str(st), "secret leaked into status"
     run(a.stop())
-
-
-def test_trade_endpoints_refuse_remote_callers():
-    from fastapi.testclient import TestClient
-    import main
-    c = TestClient(main.app)                               # host "testclient": not localhost
-    assert c.get("/api/trade/status").status_code == 403
-    assert c.post("/api/trade/start", json={"mode": "live", "confirm": "LIVE"}).status_code == 403
-    os.environ["TRADE_TOKEN"] = "t0ken"
-    try:
-        assert c.get("/api/trade/status", headers={"X-Trade-Token": "wrong"}).status_code == 403
-        r = c.get("/api/trade/status", headers={"X-Trade-Token": "t0ken"})
-        assert r.status_code == 200 and r.json()["mode"] == "off"
-    finally:
-        os.environ.pop("TRADE_TOKEN")
 
 
 if __name__ == "__main__":

@@ -59,7 +59,7 @@ halves new batches, "halt" blocks entries and closes the position. It can never
 open or enlarge a trade. (Its skip/exit calls on the rule trade are about that
 trade's direction, so the ORB trader does not follow them.)
 """
-import os, time, asyncio, datetime as dt
+import os, json, time, asyncio, datetime as dt
 from zoneinfo import ZoneInfo
 import signal_log
 
@@ -336,7 +336,7 @@ class OrbStrategy:
         self.pos = {"side": side, "sgn": sgn, "qty": qty, "qty0": qty, "entry": price, "stop": stop,
                     "stopKind": "stop", "hard": hard, "target": target, "best": price, "tp1": False,
                     "be": False, "breach": None, "opened": now, "openedAt": now.isoformat(),
-                    "entryFeeLeft": entry_fee, "pnl": 0.0}
+                    "entryFeeLeft": entry_fee, "pnl": 0.0, "id": f"{self.day}-{self.trades + 1}"}
         self.trades += 1
         self.armed[side] = False
 
@@ -432,13 +432,14 @@ class LiveBroker:
 
 # ------------------------------------------------------------------ keys
 class KeyStore:
-    """API keys live in memory only. They are never written to disk, logged,
-    or sent back to the browser (only a masked form is)."""
+    """The trader's working copy of the keys. Never logged or sent to the
+    browser (only a masked form is). Saving them for later is the caller's job
+    (accounts.py stores them encrypted)."""
 
-    def __init__(self):
+    def __init__(self, use_env=True):
         self.creds = None
         ex, k, s = os.getenv("EXCHANGE_ID"), os.getenv("EXCHANGE_API_KEY"), os.getenv("EXCHANGE_API_SECRET")
-        if ex and k and s:
+        if use_env and ex and k and s:
             self.creds = {"exchange": ex, "apiKey": k, "secret": s, "password": os.getenv("EXCHANGE_API_PASSWORD", "")}
         self.validated = None
 
@@ -490,9 +491,10 @@ def find_symbol(markets, wanted=""):
 class TradeAgent:
     """Runs the ORB strategy on a live order-book stream, in paper or live mode."""
 
-    def __init__(self, get_ai=None, exchange_factory=make_exchange):
-        self.cfg = dict(DEFAULTS)
-        self.keys = KeyStore()
+    def __init__(self, get_ai=None, exchange_factory=make_exchange, user=None, settings=None):
+        self.user = user
+        self.cfg = clean_config(settings or {})
+        self.keys = KeyStore(use_env=user is None)
         self.get_ai = get_ai or (lambda: None)
         self.exchange_factory = exchange_factory
         self.mode, self.live_armed_day = "off", None
@@ -501,6 +503,7 @@ class TradeAgent:
         self.book = None                    # latest {"bid", "ask", "imb", "ts"}
         self.limiter = RateLimiter(self.cfg["maxOrdersPerSec"])
         self.events, self.trades = [], []
+        self.history = load_history(user)     # this account's closed trades, both modes
         self.stats = {"checksPerSec": 0.0, "ordersLastSec": 0, "bookUpdatesPerSec": 0.0}
         self._order_times, self._busy = [], False
         self.error = None
@@ -522,6 +525,10 @@ class TradeAgent:
             "unrealized": round(s.unrealized(self.book["bid"], self.book["ask"]), 4) if (s and self.book) else 0.0,
             "halted": s.halted if s else None, "book": self.book, "stats": self.stats,
             "events": self.events[-30:], "trades": self.trades[-20:],
+            "view": self.mode if self.mode != "off" else (self.history[-1]["mode"] if self.history else "paper"),
+            "performance": {m: performance(self.history, m, today=now.date().isoformat(),
+                                           capital=self.cfg["paperEquity"] if m == "paper" else None)
+                            for m in ("paper", "live")},
         }
 
     def apply_preset(self, name):
@@ -734,10 +741,12 @@ class TradeAgent:
         frac = min(1.0, fill["qty"] / p["qty"]) if p["qty"] else 1.0
         side, entry = p["side"], p["entry"]
         pnl = s.closed(fill["price"], fill["fee"], frac)
-        row = {"mode": self.mode, "day": str(s.day), "side": side, "qty": round(fill["qty"], 6),
+        row = {"user": self.user, "mode": self.mode, "day": str(s.day), "tradeId": p.get("id"), "capital": self.equity,
+               "side": side, "qty": round(fill["qty"], 6),
                "entry": entry, "exit": fill["price"], "pnl": round(pnl, 4), "why": reason,
                "leverage": self.cfg["leverage"], "at": _iso()}
         self.trades.append(row)
+        self.history.append(row)
         signal_log.log_outcome({"kind": "orb_trade", **row})
         self._event(f"CLOSE {'part ' if frac < 0.999 else ''}{side} {fill['qty']:.4f} @ {fill['price']:.2f} "
                     f"({reason}) pnl {pnl:+.2f} USDT")
@@ -745,6 +754,56 @@ class TradeAgent:
     def _event(self, msg):
         self.events.append({"at": _iso(), "msg": msg})
         self.events = self.events[-200:]
+
+
+def load_history(user=None):
+    """One account's closed ORB trades from the outcomes log, oldest first."""
+    rows = []
+    try:
+        with open(signal_log.OUTCOMES) as f:
+            for line in f:
+                try:
+                    r = json.loads(line)
+                except Exception:
+                    continue
+                if r.get("kind") == "orb_trade" and r.get("mode") in ("paper", "live") and r.get("user") == user:
+                    rows.append(r)
+    except OSError:
+        pass
+    return rows
+
+
+def performance(rows, mode, today, capital=None):
+    """Profitability for one mode. Partial exits of one position count as one trade."""
+    groups, order = {}, []
+    for i, r in enumerate(x for x in rows if x.get("mode") == mode):
+        k = r.get("tradeId") or f"row{i}"
+        if k not in groups:
+            groups[k] = {"day": r.get("day"), "side": r.get("side"), "pnl": 0.0, "at": r.get("at")}
+            order.append(k)
+        groups[k]["pnl"] += float(r.get("pnl") or 0)
+        groups[k]["at"] = r.get("at")
+        if capital is None and r.get("capital"):
+            capital = float(r["capital"])
+    trades = [groups[k] for k in order]
+    n = len(trades)
+    pnls = [t["pnl"] for t in trades]
+    total = sum(pnls)
+    todays = [t["pnl"] for t in trades if t["day"] == today]
+    run, curve = 0.0, []
+    for p in pnls[-300:]:
+        run += p
+        curve.append(round(run, 3))
+    return {
+        "trades": n, "wins": sum(1 for p in pnls if p > 0),
+        "winRate": round(sum(1 for p in pnls if p > 0) / n * 100, 1) if n else None,
+        "total": round(total, 2), "today": round(sum(todays), 2), "todayTrades": len(todays),
+        "avg": round(total / n, 3) if n else None,
+        "best": round(max(pnls), 2) if n else None, "worst": round(min(pnls), 2) if n else None,
+        "capital": capital, "returnPct": round(total / capital * 100, 2) if capital else None,
+        "sessions": len({t["day"] for t in trades}), "curve": curve,
+        "recent": [{**t, "pnl": round(t["pnl"], 3)} for t in trades[-8:]][::-1],
+    }
 
 
 def _iso():
