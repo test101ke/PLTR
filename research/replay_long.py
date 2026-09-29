@@ -7,6 +7,8 @@ months, then splits older-70% / newer-30% so any parameter choice is judged on
 days it never saw. Fees are charged on every trade.
 """
 import sys, math, json, asyncio, time, datetime as dt
+import os as _os, sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
 import httpx
 import amd as amdlib
 
@@ -224,4 +226,5 @@ async def main():
     log(f"done in {time.time()-t0:.0f}s")
     print(json.dumps(out, indent=1))
 
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())

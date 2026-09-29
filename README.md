@@ -105,6 +105,18 @@ Three async loops keep a cached `STATE`; the page polls `/api/state` every secon
 
 The PLTRX symbol is **auto-discovered** on startup (scans Bybit/Kraken instruments for `PLTR`). Override with `BYBIT_SYMBOL` / `KRAKEN_PAIR` if needed. All tunables are env vars — see `.env.example` / `render.yaml`.
 
+## Open-session backtest (the 16:30 EAT trade)
+
+`python backtest.py` tests simple rules for trading only the US open, and writes `static/backtest.json` (served at `/api/backtest`, re-run daily by the desk).
+
+- **Clock:** anchored to 09:30 New York. That is **16:30 EAT** while the US is on summer time and **17:30 EAT** from 1 Nov 2026 to 14 Mar 2027. NYSE holidays are skipped.
+- **Trade:** decide 2 minutes after the open, exit 15 minutes after. Every trade pays `BT_FEE_PCT` (default 0.10%) round trip.
+- **Daily changes:** each day records the overnight move (prior 15:59 ET close to 09:29 ET) and the prior day's close-to-close change. Rules follow or fade each one.
+- **News:** days with an overnight move of `BT_EVENT_PCT`% or more (default 2.5), or dates in `BT_EVENTS`, count as event days. The live desk also logs a pre-open headline tally at 09:28 ET (`logs/signals.jsonl`, kind `open_news`); the news rules score only the days that have one, so leave the desk running through the open to build that history.
+- **Honest scoring:** oldest 70% of days train, newest 30% test. The headline rule is picked on train (t-stat of net P&L, 30+ trades) and judged on test. It "passes" only with test hit >= 70%, 95% floor > 50%, 30+ test trades and positive net expectancy.
+
+Research scripts (AMD and timeframe replays) live in `research/`: `python research/replay_long.py 180`.
+
 ## Endpoints
 - `/` dashboard · `/api/state` full JSON state · `/api/amd` AMD payload · `/api/filings` insiders + congress · `/api/backtest` edge study · `/healthz` health check.
 - PWA: `/manifest.webmanifest` · `/sw.js` (served from root so its scope covers the whole site) · `/favicon.ico`.

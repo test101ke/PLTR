@@ -13,7 +13,7 @@ services:
       - key: ANTHROPIC_API_KEY   # enables the AI news/signal agent
         sync: false
       - key: AI_MODEL
-        value: claude-3-5-haiku-latest
+        value: claude-haiku-4-5-20251001
       - key: X_BEARER_TOKEN      # optional: X/Twitter buzz
         sync: false
       - key: LARGE_TRADE_USD

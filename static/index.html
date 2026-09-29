@@ -534,12 +534,12 @@ h1,h2,h3{margin:0;font-weight:600;letter-spacing:-.02em}
         </details>
 
         <details class="fold panel card" id="p-edge">
-          <summary>Open-window edge<span class="why">16:30 EAT backtest</span></summary>
+          <summary>Open-window edge<span class="why">US open · 16:30 EAT (17:30 in US winter)</span></summary>
           <div class="foldbody">
             <div id="btVerdict"></div>
             <div class="sub-h">Average move per minute after the open</div>
             <div id="btProfile"></div>
-            <p class="muted" style="font-size:11.5px;margin:6px 2px 0">Bars = average absolute move in each minute of the open window across the backtested days. Taller early bars confirm the 16:30–16:32 concentration.</p>
+            <p class="muted" style="font-size:11.5px;margin:6px 2px 0">Bars = average absolute move in each minute of the open window across the backtested days. Taller early bars mean the move is concentrated right after the open (16:30 EAT in US summer time, 17:30 in US winter).</p>
             <div class="sub-h">Models tested · out-of-sample<button class="ib" type="button" data-i="oos" aria-label="What is this?" aria-expanded="false">i</button></div>
             <div class="list" id="btRules"></div>
             <div class="sub-h">Read &amp; caveats</div>
@@ -898,19 +898,22 @@ function drawChart(p){
 }
 function renderBacktest(bt){
   const V=$("#btVerdict"),P=$("#btProfile"),R=$("#btRules"),N=$("#btNotes");
-  if(!bt||(!bt.nDays&&!bt.error)){V.innerHTML=`<div class="verdict fail">Backtest running…<small>Fetching tokenized PLTRX 1-minute history from Bybit and testing the open-window models. This takes a few minutes on first boot; reopen this tab shortly.</small></div>`;P.innerHTML="";R.innerHTML="";N.innerHTML="";return;}
+  if(!bt||(!bt.nDays&&!bt.error)){V.innerHTML=`<div class="verdict fail">Backtest running…<small>Fetching PLTR perp 1-minute history and testing the open-session rules. This takes a few minutes on first boot; reopen this tab shortly.</small></div>`;P.innerHTML="";R.innerHTML="";N.innerHTML="";return;}
   if(bt.error){V.innerHTML=`<div class="verdict fail">Backtest unavailable<small>${esc(bt.error)}</small></div>`;return;}
   const b=bt.best;
   if(b){V.innerHTML=`<div class="verdict ${bt.passed70?"pass":"fail"}">${bt.passed70?"✓ An edge cleared 70% out-of-sample":"No rule cleared a trustworthy 70% out-of-sample yet"}
-    <small><b>${esc(b.name)}</b> — ${Math.round((b.testHit||0)*100)}% on ${b.nTest} held-out days · 95% floor ${Math.round((b.ciLow||0)*100)}% · p=${b.p} · ${bt.nDays} days tested (${(bt.dateRange||[]).join(" → ")})</small></div>`;}
+    <small><b>${esc(b.name)}</b> (chosen on train) — ${Math.round((b.testHit||0)*100)}% on ${b.nTest} held-out days, net ${b.expectancy==null?"–":b.expectancy.toFixed(3)+"%"}/trade · 95% floor ${Math.round((b.ciLow||0)*100)}% · p=${b.p} · ${bt.nDays} days tested (${(bt.dateRange||[]).join(" → ")})</small></div>`;}
   else{V.innerHTML=`<div class="verdict fail">Not enough data yet<small>${esc((bt.notes||[])[0]||"")}</small></div>`;}
   const mp=bt.minuteProfile||[];const mx=Math.max(1e-9,...mp.map(x=>x.avgAbs));const sig=bt.signalMin||2;
   P.innerHTML=`<div class="profile">`+mp.map(x=>`<div class="b ${x.m<=sig?"hot":""}" style="height:${(x.avgAbs/mx*100).toFixed(0)}%" title="min ${x.m}: ${(x.avgAbs*100).toFixed(2)}%"><b>${x.m}</b></div>`).join("")+`</div>`;
-  const rules=(bt.rules||[]).filter(r=>r.testHit!=null).sort((a,b)=>b.testHit-a.testHit);
-  R.innerHTML=rules.map(r=>{const pass=r.testHit>=0.7&&r.ciLow>0.5&&r.nTest>=30;
-    return `<div class="item"><span class="k">${esc(r.name)}</span><span class="v mono">${Math.round(r.testHit*100)}%<span class="tag ${pass?"up":"flat"}">n=${r.nTest}${r.ciLow!=null?" · floor "+Math.round(r.ciLow*100)+"%":""}</span></span></div>`;}).join("")||`<div class="muted" style="padding:6px">No rules with enough out-of-sample trades yet.</div>`;
+  const pct=v=>v==null?"–":Math.round(v*100)+"%",net=v=>v==null?"–":(v>0?"+":"")+v.toFixed(3)+"%";
+  const rules=(bt.rules||[]).filter(r=>r.trainT!=null||r.testHit!=null).sort((a,b)=>((a.nTrain>=30?0:1)-(b.nTrain>=30?0:1))||((b.trainT??-99)-(a.trainT??-99)));
+  R.innerHTML=rules.map(r=>{const chosen=b&&r.name===b.name;
+    return `<div class="item"><span class="k">${chosen?"★ ":""}${esc(r.name)}</span><span class="v mono">${pct(r.trainHit)} → ${pct(r.testHit)}<span class="tag ${(r.expectancy||0)>0?"up":"flat"}">n=${r.nTest} · ${net(r.expectancy)}</span></span></div>`;}).join("")||`<div class="muted" style="padding:6px">No rules with enough trades yet.</div>`;
+  if((bt.regimes||[]).length){R.innerHTML+=`<p class="muted" style="font-size:11.5px;margin:10px 2px 4px">Follow-the-first-move, by kind of day (all days, descriptive only):</p>`
+    +bt.regimes.map(g=>`<div class="item"><span class="k">${esc(g.name)}</span><span class="v mono">${pct(g.hit)}<span class="tag flat">${g.trades} trades · ${net(g.expectancy)}</span></span></div>`).join("");}
   N.innerHTML=(bt.notes||[]).map(n=>`<div class="notecard">${esc(n)}</div>`).join("")
-    +`<div class="notecard"><b>Auto-trader readiness:</b> ${bt.passed70?"a rule passed out-of-sample — next step is a paper-trading harness against live PLTRX fills (16:30–16:45 EAT, weighted to 16:30–16:32) before any real capital.":"hold off on automating — no rule is reliable enough. Keep collecting data; the study re-runs daily."} POST /api/backtest/run to refresh on demand.</div>`;
+    +`<div class="notecard"><b>Auto-trader readiness:</b> ${bt.passed70?"the train-chosen rule passed out-of-sample. Next: paper-trade it at the open (16:30 EAT, 17:30 EAT in US winter) before any real capital.":"hold off on automating. No rule is reliable enough. Keep collecting data; the study re-runs daily."} Train hit → test hit shown per rule; ★ marks the rule chosen on train. POST /api/backtest/run to refresh.</div>`;
 }
 function esc(s){return(s||"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
 function fmtPub(p){if(!p)return"";const t=Date.parse(p);return isNaN(t)?"":ago(t)+" ago";}

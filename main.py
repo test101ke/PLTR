@@ -17,7 +17,7 @@ The frontend polls /api/state every second.
 
 Env vars (all optional except where noted):
   ANTHROPIC_API_KEY   enable the AI agent (falls back to keyword scoring if unset)
-  AI_MODEL            default "claude-3-5-haiku-latest"
+  AI_MODEL            default "claude-haiku-4-5-20251001"
   X_BEARER_TOKEN      enable X/Twitter buzz (skipped if unset)
   BYBIT_SYMBOL        override auto-discovery (e.g. "PLTRXUSDT")
   KRAKEN_PAIR         override auto-discovery (e.g. "PLTRXUSD")
@@ -44,7 +44,7 @@ import signal_log
 # ---------------------------------------------------------------- config
 CFG = {
     "ANTHROPIC_API_KEY": os.getenv("ANTHROPIC_API_KEY", "").strip(),
-    "AI_MODEL": os.getenv("AI_MODEL", "claude-3-5-haiku-latest").strip(),
+    "AI_MODEL": os.getenv("AI_MODEL", "claude-haiku-4-5-20251001").strip(),
     "X_BEARER_TOKEN": os.getenv("X_BEARER_TOKEN", "").strip(),
     "BYBIT_SYMBOL": os.getenv("BYBIT_SYMBOL", "").strip(),
     "KRAKEN_PAIR": os.getenv("KRAKEN_PAIR", "").strip(),
@@ -872,7 +872,28 @@ async def run_news():
             ag["thesis"] = _fallback_thesis(STATE["stock"], STATE["crypto"], cu, cd)
         if news:
             STATE["meta"]["newsAsOf"] = now_iso()
+    log_open_news()
     recompute_signal()
+
+
+def log_open_news():
+    """Once per session, just before 09:30 New York (16:30/17:30 EAT), record the
+    news tally since the prior close. backtest.py joins these rows by date, which
+    is the only way the open-session study can learn anything about news."""
+    now = dt.datetime.now(bt.NY)
+    if now.weekday() >= 5 or now.date().isoformat() in bt.NYSE_HOLIDAYS:
+        return
+    if not (dt.time(9, 28) <= now.time() < dt.time(9, 30)):
+        return
+    since = (now - dt.timedelta(hours=17, minutes=30)).timestamp() * 1000   # ~prior 16:00 close
+    fresh = [n for n in STATE["news"] if n.get("kind", "news") == "news" and (n.get("ts") or 0) >= since]
+    up = sum(1 for n in fresh if n.get("dir") == "up")
+    down = sum(1 for n in fresh if n.get("dir") == "down")
+    signal_log.log_signal("open_news", {
+        "nyDate": now.date().isoformat(), "n": len(fresh), "up": up, "down": down, "net": up - down,
+        "aiScored": sum(1 for n in fresh if n.get("aiScored")),
+        "headlines": [n.get("headline") for n in fresh[:12]],
+    }, fingerprint=now.date().isoformat())
 
 
 async def run_agent():

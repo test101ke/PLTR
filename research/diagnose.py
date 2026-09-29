@@ -1,7 +1,9 @@
 """Second pass: WHY the rules failed, and what a fix would have done."""
 import sys, math, json, asyncio, statistics as stats, datetime as dt
+import os as _os, sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
 import httpx, amd as amdlib
-from replay import klines, wilson, binom_p
+from research.replay import klines, wilson, binom_p
 
 def z_test(w, n, p0=0.5):
     if not n: return None, None
@@ -86,4 +88,5 @@ async def main():
     out["amd_minStop_0p50"]=amd_stops(c5,c1,days,min_stop_pct=0.50)
     out["amd_minStop_1p00"]=amd_stops(c5,c1,days,min_stop_pct=1.00)
     print(json.dumps(out,indent=1))
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())
