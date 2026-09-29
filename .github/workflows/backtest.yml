@@ -28,13 +28,17 @@ jobs:
       - name: Which exchanges answer from here
         run: |
           for u in https://api.bybit.com/v5/market/time https://fapi.binance.com/fapi/v1/time \
-                   https://api-futures.kucoin.com/api/v1/timestamp https://query1.finance.yahoo.com/v8/finance/chart/PLTR; do
+                   https://api.bitget.com/api/v2/public/time https://www.okx.com/api/v5/public/time \
+                   https://api.gateio.ws/api/v4/spot/time https://contract.mexc.com/api/v1/contract/ping \
+                   https://api-futures.kucoin.com/api/v1/timestamp; do
             echo "$u -> $(curl -s -o /dev/null -w '%{http_code}' -m 10 "$u")"
           done
       - name: Backtest on live data
         env:
           BT_DAYS: ${{ github.event.inputs.days || '200' }}
-        run: python backtest.py | tee backtest.txt
+        run: |
+          set -o pipefail
+          python backtest.py 2>&1 | tee backtest.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
