@@ -18,9 +18,24 @@ Strategy (per session):
   2. After it, go LONG when the mid breaks above the high by `bufferPct` and the
      book leans to bids (bid share >= `imbalanceMin`%), or SHORT when it breaks
      below the low with the book leaning to asks.
-  3. Take profit at `takeProfitUsd` net of fees; stop at `stopLossUsd`
-     including fees (either set to 0 falls back to targetR x risk / the range
-     middle).
+  3. Exits (EXIT OPTIONS). The open is violent, so a plain tight stop gets
+     shaken out just before the real move. Tools against that, all optional:
+       - emergency stop `hardStopPct` from entry: ALWAYS on, fires instantly.
+         At 10x a ~10% move liquidates, so trading with no stop is not offered;
+       - normal stop: $ (`usd`), a fraction of the opening range (`range`), or
+         none (`hard`, emergency stop only);
+       - `graceSec`: the normal stop is ignored this long after entry;
+       - `confirmMs`: the stop must stay breached this long (a one-tick wick
+         does not count);
+       - `breakevenUsd`: once this profit shows, the stop moves to break-even
+         (entry plus the round-trip fee);
+       - first target `takeProfitUsd` (net of fees): bank `partialPct`% there
+         (100 = the old fixed $1 exit) and lift the stop to break-even;
+       - `trailPct`: the rest trails that far behind the best price, so a
+         0.2%-in-a-second spike is ridden instead of capped at $1.
+       - `reentrySec`: after any exit, wait before the next entry, so it does
+         not buy the top of the spike it just sold.
+     PRESETS holds one-tap combinations (Scalp, Runner, Wick-proof, Burst).
   4. Up to `maxTrades` trades. After a winning exit the same side re-arms on a
      fresh high (long) or low (short) beyond the exit price: that is how it
      takes several small trades out of one strong move. After a loss it waits
@@ -39,8 +54,10 @@ Modes:
          touch plus slippage and taker fees. No keys needed. The default.
   live   real orders with your API keys. Must be armed explicitly each day.
 
-The AI supervisor (engine.py) is consulted before each entry: it can skip the
-entry, shrink it, or order an exit. It can never open or enlarge a trade.
+The AI supervisor (engine.py) reports a direction-free `marketRisk`: "elevated"
+halves new batches, "halt" blocks entries and closes the position. It can never
+open or enlarge a trade. (Its skip/exit calls on the rule trade are about that
+trade's direction, so the ORB trader does not follow them.)
 """
 import os, time, asyncio, datetime as dt
 from zoneinfo import ZoneInfo
@@ -49,15 +66,26 @@ import signal_log
 NY = ZoneInfo("America/New_York")
 EAT = ZoneInfo("Africa/Nairobi")
 
-# Fee per side, in %, by exchange (the account's VIP rates). Round trip = 2x.
-FEES = {"bybit": 0.0, "binanceusdm": 0.05}
+# Fee per side, in %, by exchange. Deliberately the worst case for both venues
+# (0.06% a side, 0.12% round trip) so results are never flattered by a VIP rate.
+FEES = {"bybit": 0.06, "binanceusdm": 0.06}
 
 DEFAULTS = {
     "exchange": "bybit", "symbol": "", "leverage": 10,
     "batchUsd": 100.0,        # margin per trade in USDT (0 = use marginPct instead)
     "marginPct": 10.0,
-    "takeProfitUsd": 1.0,     # net profit per batch after fees (0 = use targetR)
-    "stopLossUsd": 1.0,       # max loss per batch incl. fees (0 = stop at range middle)
+    "takeProfitUsd": 1.0,     # first target: net profit per batch after fees (0 = use targetR)
+    "stopLossUsd": 1.5,       # usd stop mode: max loss per batch incl. fees
+    # --- exits (see EXIT OPTIONS above); defaults = the "Runner" preset ---
+    "stopMode": "range",      # usd | range | hard  (hard = emergency stop only)
+    "rangeStopFrac": 0.5,     # range mode: stop this fraction of the opening range beyond entry
+    "hardStopPct": 1.0,       # emergency stop, % of price from entry. Always on.
+    "graceSec": 3.0,          # ignore the normal stop for this long after entry
+    "confirmMs": 500.0,       # the stop must stay breached this long before it fires
+    "breakevenUsd": 0.6,      # once this much profit shows, the stop moves to break-even (0 = off)
+    "partialPct": 50.0,       # % of the batch banked at the first target (100 = fixed exit)
+    "trailPct": 0.15,         # after the first target, trail the rest this % behind the best price (0 = off)
+    "reentrySec": 5.0,        # after any exit, wait this long before a new entry (no chasing a spike top)
     "orbMinutes": 2, "bufferPct": 0.02, "targetR": 1.5, "maxTrades": 10, "exitAfterMin": 15,
     "dailyLossPct": 3.0, "imbalanceMin": 55.0, "maxNotional": 5000.0,
     "tickHz": 10, "maxOrdersPerSec": 20, "takerFeePct": -1.0, "slippagePct": 0.01,
@@ -65,10 +93,30 @@ DEFAULTS = {
 }
 BOUNDS = {
     "leverage": (1, 20), "marginPct": (1, 100), "batchUsd": (0, 1e6), "takeProfitUsd": (0, 1e4),
-    "stopLossUsd": (0, 1e4), "orbMinutes": (1, 15), "bufferPct": (0, 1),
+    "stopLossUsd": (0, 1e4), "rangeStopFrac": (0.1, 2), "hardStopPct": (0.2, 5), "graceSec": (0, 60),
+    "confirmMs": (0, 5000), "reentrySec": (0, 300), "breakevenUsd": (0, 1e4), "partialPct": (0, 100), "trailPct": (0, 2), "orbMinutes": (1, 15), "bufferPct": (0, 1),
     "targetR": (0.5, 5), "maxTrades": (1, 10), "exitAfterMin": (5, 390), "dailyLossPct": (0.5, 20),
     "imbalanceMin": (50, 90), "maxNotional": (10, 1e7), "tickHz": (5, 20), "maxOrdersPerSec": (1, 20),
     "takerFeePct": (-1, 1), "slippagePct": (0, 1), "paperEquity": (10, 1e9),
+}
+
+
+# One-tap presets. They change exits only; leverage, batch size and risk limits stay yours.
+PRESETS = {
+    "scalp": {"label": "Scalp", "note": "Bank $1 and get out. Tight $1.5 stop, no trailing.",
+              "takeProfitUsd": 1.0, "partialPct": 100, "trailPct": 0, "stopMode": "usd", "stopLossUsd": 1.5,
+              "graceSec": 0, "confirmMs": 0, "breakevenUsd": 0},
+    "runner": {"label": "Runner", "note": "Bank half at $1, trail the rest 0.15% behind the best price. Stop at "
+                                          "half the opening range, ignored for 3s, needs 0.5s to confirm.",
+               "takeProfitUsd": 1.0, "partialPct": 50, "trailPct": 0.15, "stopMode": "range", "rangeStopFrac": 0.5,
+               "graceSec": 3, "confirmMs": 500, "breakevenUsd": 0.6},
+    "wickproof": {"label": "Wick-proof", "note": "Only the 1% emergency stop for 10s, then a full-range stop that "
+                                                 "must hold 1s. Break-even at $0.5; bank 30% at $1, trail 0.25%.",
+                  "takeProfitUsd": 1.0, "partialPct": 30, "trailPct": 0.25, "stopMode": "range", "rangeStopFrac": 1.0,
+                  "graceSec": 10, "confirmMs": 1000, "breakevenUsd": 0.5},
+    "burst": {"label": "Burst", "note": "For sharp 0.2%+ spikes: no fixed target, trail 0.08% once $0.5 is showing.",
+              "takeProfitUsd": 0.5, "partialPct": 0, "trailPct": 0.08, "stopMode": "range", "rangeStopFrac": 0.5,
+              "graceSec": 2, "confirmMs": 300, "breakevenUsd": 0.4},
 }
 
 
@@ -89,6 +137,8 @@ def clean_config(cfg, base=None):
                 v = int(round(v))
         else:
             v = str(v).strip()
+            if k == "stopMode" and v not in ("usd", "range", "hard"):
+                continue
         out[k] = v
     return out
 
@@ -137,6 +187,7 @@ class OrbStrategy:
         self.pos = None            # {"side", "qty", "entry", "stop", "target", "openedAt"}
         self.armed = {"long": True, "short": True}
         self.after_win = None      # after a winning exit: {"side", "ext"} for continuation re-entry
+        self.now, self.cool_until = None, None
 
     def phase(self, now):
         op = open_time(now.date())
@@ -159,6 +210,7 @@ class OrbStrategy:
         """Return a list of actions: ("open", side, reason) or ("close", reason)."""
         if now.date() != self.day:
             self.reset_day(now.date())
+        self.now = now
         mid = (bid + ask) / 2
         ph = self.phase(now)
         acts = []
@@ -170,17 +222,9 @@ class OrbStrategy:
             return acts
         if self.hi is None:            # started after the range window: no range, no trades
             return acts
+        risk = (ai or {}).get("marketRisk")
         if self.pos:
-            p = self.pos
-            px = bid if p["side"] == "long" else ask
-            if ph == "session over":
-                acts.append(("close", "time exit"))
-            elif (ai or {}).get("action") == "exit":
-                acts.append(("close", "AI exit"))
-            elif (p["side"] == "long" and px <= p["stop"]) or (p["side"] == "short" and px >= p["stop"]):
-                acts.append(("close", "stop"))
-            elif (p["side"] == "long" and px >= p["target"]) or (p["side"] == "short" and px <= p["target"]):
-                acts.append(("close", "target"))
+            acts = self._manage(now, bid, ask, ph, risk)
             loss = self.realized + self.unrealized(bid, ask)
             if not acts and loss <= -self.start_equity * self.cfg["dailyLossPct"] / 100:
                 acts.append(("close", "daily loss limit")); self.halted = "daily loss limit"
@@ -196,7 +240,9 @@ class OrbStrategy:
         if w and not self.armed[w["side"]]:
             if (w["side"] == "long" and mid > w["ext"]) or (w["side"] == "short" and mid < w["ext"]):
                 self.armed[w["side"]] = True
-        if (ai or {}).get("action") in ("stand_aside", "exit"):
+        if risk == "halt":             # the supervisor sees a disorderly market or a news shock
+            return acts
+        if self.cool_until and now < self.cool_until:
             return acts
         buf = self.cfg["bufferPct"] / 100
         if self.armed["long"] and mid > self.hi * (1 + buf) and imbalance >= self.cfg["imbalanceMin"]:
@@ -209,32 +255,106 @@ class OrbStrategy:
         margin = self.cfg["batchUsd"] if self.cfg.get("batchUsd") else equity * self.cfg["marginPct"] / 100
         margin = min(margin, equity)
         notional = min(margin * self.cfg["leverage"], self.cfg["maxNotional"])
-        scale = (ai or {}).get("size", 1.0) if (ai or {}).get("action") == "reduce" else 1.0
+        scale = 0.5 if (ai or {}).get("marketRisk") == "elevated" else 1.0
         return notional * scale / price
 
-    def opened(self, side, qty, price, now):
+    def _profit(self, px):
+        """Open profit in USDT on what is left, after the round-trip fee on it."""
+        p = self.pos
+        gross = (px - p["entry"]) * p["qty"] * p["sgn"]
+        return gross - 2 * p["entry"] * p["qty"] * fee_pct(self.cfg) / 100
+
+    def _manage(self, now, bid, ask, ph, risk):
+        """Exits for an open position. Order: time, AI risk-off, emergency stop, first
+        target (bank some, arm the trail), break-even lock, trail, confirmed stop."""
+        p, c = self.pos, self.cfg
+        sgn = p["sgn"]
+        px = bid if sgn > 0 else ask
+        better = (lambda a, b: a > b) if sgn > 0 else (lambda a, b: a < b)
+        if better(px, p["best"]):
+            p["best"] = px
+        if ph == "session over":
+            return [("close", "time exit")]
+        if risk == "halt":
+            return [("close", "AI risk-off")]
+        if not better(px, p["hard"]):
+            return [("close", "emergency stop")]
+        profit = self._profit(px)
+        be_price = p["entry"] * (1 + sgn * 2 * fee_pct(c) / 100)
+        acts = []
+        if not p["tp1"] and ((c["takeProfitUsd"] and profit >= c["takeProfitUsd"]) or
+                             (not c["takeProfitUsd"] and not better(p["target"], px))):
+            p["tp1"] = True
+            self._lift_stop(be_price)
+            if c["partialPct"] >= 100:
+                return [("close", "target")]
+            if c["partialPct"] > 0:
+                acts.append(("close", "first target (partial)", c["partialPct"] / 100))
+        if not p["be"] and c["breakevenUsd"] and profit >= c["breakevenUsd"]:
+            p["be"] = True
+            self._lift_stop(be_price)
+        if p["tp1"] and c["trailPct"]:
+            self._lift_stop(p["best"] * (1 - sgn * c["trailPct"] / 100), trail=True)
+        if acts:
+            return acts
+        if p["stop"] is None:
+            return []
+        in_grace = (now - p["opened"]).total_seconds() < c["graceSec"] and not (p["tp1"] or p["be"])
+        if in_grace or better(px, p["stop"]):
+            p["breach"] = None
+            return []
+        p["breach"] = p["breach"] or now
+        if (now - p["breach"]).total_seconds() * 1000 >= c["confirmMs"]:
+            return [("close", p["stopKind"])]
+        return []
+
+    def _lift_stop(self, level, trail=False):
+        """Move the stop in the trade's favour only, never back."""
+        p = self.pos
+        if p["stop"] is None or (level > p["stop"] if p["sgn"] > 0 else level < p["stop"]):
+            p["stop"] = level
+            p["stopKind"] = "trailing stop" if trail else "break-even stop"
+
+    def opened(self, side, qty, price, now, entry_fee=0.0):
+        c = self.cfg
         sgn = 1 if side == "long" else -1
-        fees = 2 * price * qty * fee_pct(self.cfg) / 100      # round trip, in USDT
-        risk = (price - (self.hi + self.lo) / 2) if side == "long" else ((self.hi + self.lo) / 2 - price)
-        risk = max(risk, price * 0.001)                      # never a zero-width stop
-        if self.cfg.get("stopLossUsd"):                      # dollar stop: loss incl. fees <= stopLossUsd
-            risk = max((self.cfg["stopLossUsd"] - fees) / qty, price * 0.0002)
-        stop = price - sgn * risk
-        if self.cfg.get("takeProfitUsd"):                    # dollar target: net of fees
-            target = price + sgn * (self.cfg["takeProfitUsd"] + fees) / qty
+        fees = 2 * price * qty * fee_pct(c) / 100            # round trip, in USDT
+        hard = price * (1 - sgn * c["hardStopPct"] / 100)
+        if c["stopMode"] == "usd":
+            dist = max((c["stopLossUsd"] - fees) / qty, price * 0.0002)
+        elif c["stopMode"] == "range":
+            dist = max(c["rangeStopFrac"] * (self.hi - self.lo), price * 0.0005)
         else:
-            target = price + sgn * risk * self.cfg["targetR"]
-        self.pos = {"side": side, "qty": qty, "entry": price, "stop": stop,
-                    "target": target, "openedAt": now.isoformat()}
+            dist = None                                       # hard: emergency stop only
+        stop = None if dist is None else price - sgn * dist
+        if stop is not None and (stop < hard if sgn > 0 else stop > hard):
+            stop = None                                       # emergency stop is tighter anyway
+        if c.get("takeProfitUsd"):
+            target = price + sgn * (c["takeProfitUsd"] + fees) / qty
+        else:
+            target = price + sgn * (dist or price * 0.002) * c["targetR"]
+        self.pos = {"side": side, "sgn": sgn, "qty": qty, "qty0": qty, "entry": price, "stop": stop,
+                    "stopKind": "stop", "hard": hard, "target": target, "best": price, "tp1": False,
+                    "be": False, "breach": None, "opened": now, "openedAt": now.isoformat(),
+                    "entryFeeLeft": entry_fee, "pnl": 0.0}
         self.trades += 1
         self.armed[side] = False
 
-    def closed(self, price, fee):
+    def closed(self, price, exit_fee, fraction=1.0):
+        """Book a full or partial exit. Returns the P&L of this piece, after fees."""
         p = self.pos
-        pnl = (price - p["entry"]) * p["qty"] * (1 if p["side"] == "long" else -1) - fee
+        fraction = min(1.0, max(0.0, fraction))
+        q = p["qty"] * fraction
+        ef = p["entryFeeLeft"] * fraction
+        pnl = (price - p["entry"]) * q * p["sgn"] - exit_fee - ef
         self.realized += pnl
-        self.pos = None
-        self.after_win = {"side": p["side"], "ext": price} if pnl > 0 else None
+        p["pnl"] += pnl
+        p["qty"] -= q; p["entryFeeLeft"] -= ef
+        if fraction >= 0.999 or p["qty"] <= p["qty0"] * 1e-6:
+            self.after_win = {"side": p["side"], "ext": price} if p["pnl"] > 0 else None
+            self.pos = None
+            if self.now is not None:
+                self.cool_until = self.now + dt.timedelta(seconds=self.cfg.get("reentrySec", 0))
         return pnl
 
 
@@ -392,6 +512,7 @@ class TradeAgent:
         return {
             "mode": self.mode, "liveArmed": self.live_armed_day == now.date(), "config": self.cfg,
             "feePct": fee_pct(self.cfg),
+            "presets": {k: {"label": v["label"], "note": v["note"]} for k, v in PRESETS.items()},
             "keys": self.keys.masked(), "symbol": self.symbol, "equity": self.equity, "error": self.error,
             "phase": s.phase(now) if s else "stopped",
             "openEAT": open_time(now.date()).astimezone(EAT).strftime("%H:%M"),
@@ -402,6 +523,11 @@ class TradeAgent:
             "halted": s.halted if s else None, "book": self.book, "stats": self.stats,
             "events": self.events[-30:], "trades": self.trades[-20:],
         }
+
+    def apply_preset(self, name):
+        if name not in PRESETS:
+            raise ValueError(f"unknown preset '{name}'")
+        return self.configure({k: v for k, v in PRESETS[name].items() if k not in ("label", "note")})
 
     def configure(self, cfg):
         if self.mode != "off":
@@ -566,8 +692,8 @@ class TradeAgent:
             for act in s.on_tick(now, b["bid"], b["ask"], b["imb"], ai):
                 if act[0] == "open":
                     await self._open(act[1], act[2], now, ai)
-                else:
-                    await self._close(act[1])
+                elif s.pos:
+                    await self._close(act[1], act[2] if len(act) > 2 else 1.0)
         except Exception as e:
             self.error = f"{type(e).__name__}: {str(e)[:160]}"
             self._event("order error: " + self.error)
@@ -588,22 +714,33 @@ class TradeAgent:
         if qty <= 0:
             return
         fill = await self._order("buy" if side == "long" else "sell", qty, False)
-        s.opened(side, fill["qty"], fill["price"], now)
-        s.pos["entryFee"] = fill["fee"]
+        s.opened(side, fill["qty"], fill["price"], now, fill["fee"])
+        stop = s.pos["stop"]
         self._event(f"OPEN {side} {fill['qty']:.4f} @ {fill['price']:.2f} ({reason}); "
-                    f"stop {s.pos['stop']:.3f}, target {s.pos['target']:.3f}")
+                    f"stop {'emergency only' if stop is None else f'{stop:.3f}'} "
+                    f"(emergency {s.pos['hard']:.3f}), first target {s.pos['target']:.3f}")
 
-    async def _close(self, reason):
+    async def _close(self, reason, fraction=1.0):
         s = self.strategy
-        p = dict(s.pos)
-        fill = await self._order("sell" if p["side"] == "long" else "buy", p["qty"], True)
-        pnl = s.closed(fill["price"], fill["fee"] + p.get("entryFee", 0.0))
-        row = {"mode": self.mode, "day": str(s.day), "side": p["side"], "qty": round(p["qty"], 6),
-               "entry": p["entry"], "exit": fill["price"], "pnl": round(pnl, 4), "why": reason,
+        p = s.pos
+        qty = p["qty"] * fraction
+        try:
+            fill = await self._order("sell" if p["side"] == "long" else "buy", qty, True)
+        except ValueError:
+            if fraction < 1.0:                     # partial rounds to zero at the exchange step
+                self._event("partial exit too small for the exchange: riding full size")
+                return
+            raise
+        frac = min(1.0, fill["qty"] / p["qty"]) if p["qty"] else 1.0
+        side, entry = p["side"], p["entry"]
+        pnl = s.closed(fill["price"], fill["fee"], frac)
+        row = {"mode": self.mode, "day": str(s.day), "side": side, "qty": round(fill["qty"], 6),
+               "entry": entry, "exit": fill["price"], "pnl": round(pnl, 4), "why": reason,
                "leverage": self.cfg["leverage"], "at": _iso()}
         self.trades.append(row)
         signal_log.log_outcome({"kind": "orb_trade", **row})
-        self._event(f"CLOSE {p['side']} @ {fill['price']:.2f} ({reason}) pnl {pnl:+.2f} USDT")
+        self._event(f"CLOSE {'part ' if frac < 0.999 else ''}{side} {fill['qty']:.4f} @ {fill['price']:.2f} "
+                    f"({reason}) pnl {pnl:+.2f} USDT")
 
     def _event(self, msg):
         self.events.append({"at": _iso(), "msg": msg})

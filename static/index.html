@@ -555,13 +555,32 @@ dialog.tp::backdrop{background:rgba(0,0,0,.45)}
       <div class="ev" id="tpEvents" style="margin-top:9px">No activity yet.</div>
     </fieldset>
 
+    <fieldset><legend>Exit presets (one tap)</legend>
+      <div class="row" id="tpPresets"></div>
+      <p class="msg" id="tpPresetNote" style="margin:8px 0 0">Presets change exits only. Leverage, batch size and loss limits stay as you set them.</p>
+    </fieldset>
+
+    <fieldset><legend>Exits</legend>
+      <div class="grid2">
+        <label>First target, net (USDT)<input id="c-takeProfitUsd" type="number" min="0" step="0.1"></label>
+        <label>Bank at first target (%)<input id="c-partialPct" type="number" min="0" max="100" step="10"></label>
+        <label>Trail the rest (% behind best, 0 = off)<input id="c-trailPct" type="number" min="0" max="2" step="0.01"></label>
+        <label>Break-even lock after (USDT, 0 = off)<input id="c-breakevenUsd" type="number" min="0" step="0.1"></label>
+        <label>Stop type<select id="c-stopMode"><option value="range">Part of opening range</option><option value="usd">Fixed $ loss</option><option value="hard">Emergency stop only</option></select></label>
+        <label>Range stop (x range width)<input id="c-rangeStopFrac" type="number" min="0.1" max="2" step="0.1"></label>
+        <label>$ stop per batch, incl. fees<input id="c-stopLossUsd" type="number" min="0" step="0.1"></label>
+        <label>Ignore stop after entry (s)<input id="c-graceSec" type="number" min="0" max="60" step="1"></label>
+        <label>Stop must hold (ms)<input id="c-confirmMs" type="number" min="0" max="5000" step="100"></label>
+        <label>Emergency stop, always on (%)<input id="c-hardStopPct" type="number" min="0.2" max="5" step="0.1"></label>
+        <label>Wait after an exit (s)<input id="c-reentrySec" type="number" min="0" max="300" step="1"></label>
+      </div>
+    </fieldset>
+
     <fieldset><legend>Strategy</legend>
       <div class="grid2">
         <label>Leverage (x)<input id="c-leverage" type="number" min="1" max="20" step="1"></label>
         <label>Batch margin per trade (USDT)<input id="c-batchUsd" type="number" min="0" step="10"></label>
-        <label>Take profit per batch, net (USDT)<input id="c-takeProfitUsd" type="number" min="0" step="0.1"></label>
-        <label>Stop loss per batch, incl. fees (USDT)<input id="c-stopLossUsd" type="number" min="0" step="0.1"></label>
-        <label>Fee per side % (-1 = exchange rate)<input id="c-takerFeePct" type="number" min="-1" max="1" step="0.01"></label>
+        <label>Fee per side % (-1 = 0.06% worst case)<input id="c-takerFeePct" type="number" min="-1" max="1" step="0.01"></label>
         <label>Opening range (min)<input id="c-orbMinutes" type="number" min="1" max="15" step="1"></label>
         <label>Max trades per session<input id="c-maxTrades" type="number" min="1" max="10" step="1"></label>
         <label>Breakout buffer (%)<input id="c-bufferPct" type="number" min="0" max="1" step="0.01"></label>
@@ -572,7 +591,7 @@ dialog.tp::backdrop{background:rgba(0,0,0,.45)}
         <label>Book checks per second (5-20)<input id="c-tickHz" type="number" min="5" max="20" step="1"></label>
         <label>Max orders per second (≤20)<input id="c-maxOrdersPerSec" type="number" min="1" max="20" step="1"></label>
         <label>Paper equity (USDT)<input id="c-paperEquity" type="number" min="10" step="100"></label>
-        <label>Paper exchange (market data)<select id="c-exchange"><option value="bybit">Bybit (0% fee)</option><option value="binanceusdm">Binance futures (0.05%/side)</option></select></label>
+        <label>Paper exchange (market data)<select id="c-exchange"><option value="bybit">Bybit</option><option value="binanceusdm">Binance futures</option></select></label>
       </div>
       <div class="row" style="margin-top:9px"><button class="b" type="button" id="tpSaveCfg">Save settings</button><span class="msg" id="tpCfgMsg"></span></div>
     </fieldset>
@@ -782,7 +801,7 @@ function renderPlan(p){
   $("#planTiles").innerHTML=tiles.map(t=>`<div class="tile"><div class="k">${t[0]}</div><div class="v mono" style="font-size:14px">${esc(String(t[1]))}</div><div class="x">${esc(t[2])}</div></div>`).join("");
   const a=p.ai;
   $("#planAi").innerHTML=!p.aiEnabled?"<b>AI supervisor:</b> off (set ANTHROPIC_API_KEY). The rule and stop run on their own."
-    :a?`<b>AI supervisor:</b> ${esc(a.action.replace("_"," "))} · size ${Math.round(a.size*100)}% · stop ${a.stopPct}% · ${esc(a.reason)} <span class="muted">(${ago(Date.parse(a.at))} ago)</span>`
+    :a?`<b>AI supervisor:</b> ${esc(a.action.replace("_"," "))} · size ${Math.round(a.size*100)}% · stop ${a.stopPct}% · market risk ${esc(a.marketRisk||"normal")} · ${esc(a.reason)} <span class="muted">(${ago(Date.parse(a.at))} ago)</span>`
     :"<b>AI supervisor:</b> wakes 30 min before the open, on every new headline, and near the stop.";
 }
 
@@ -844,7 +863,7 @@ async function tapi(path,method="GET",body){
   return j;
 }
 function tpErr(m){const e=$("#tpErr");e.hidden=!m;e.textContent=m||"";}
-const CFG_KEYS=["leverage","batchUsd","takeProfitUsd","stopLossUsd","takerFeePct","orbMinutes","maxTrades","bufferPct","imbalanceMin","exitAfterMin","dailyLossPct","maxNotional","tickHz","maxOrdersPerSec","paperEquity","exchange"];
+const CFG_KEYS=["leverage","batchUsd","takeProfitUsd","stopLossUsd","takerFeePct","partialPct","trailPct","breakevenUsd","stopMode","rangeStopFrac","graceSec","confirmMs","hardStopPct","reentrySec","orbMinutes","maxTrades","bufferPct","imbalanceMin","exitAfterMin","dailyLossPct","maxNotional","tickHz","maxOrdersPerSec","paperEquity","exchange"];
 async function tpPull(){
   try{const st=await tapi("status");TP.st=st;$("#tpTokenBox").hidden=true;renderTrade(st);}
   catch(e){const b=$("#tradeSt");b.textContent=e.status===403?"locked":"—";b.className="st";
@@ -857,11 +876,13 @@ function renderTrade(st){
   $("#tpTitle").textContent=`ORB trader · US open ${st.openEAT||"16:30"} EAT`;
   const run=m!=="off";$("#tpPaper").disabled=run;$("#tpLive").disabled=run;$("#tpStop").disabled=!run;$("#tpSaveCfg").disabled=run;
   const c=st.config||{};
-  if(!TP.cfgLoaded){CFG_KEYS.forEach(k=>{const el=$("#c-"+k);if(el&&c[k]!=null)el.value=c[k];});TP.cfgLoaded=true;}
+  if(!TP.cfgLoaded){fillCfg(c);TP.cfgLoaded=true;}
+  const pr=st.presets||{};
+  $("#tpPresets").innerHTML=Object.entries(pr).map(([k,v])=>`<button class="b" type="button" data-preset="${k}" title="${esc(v.note)}" ${run?"disabled":""}>${esc(v.label)}</button>`).join("");
   const p=st.position,r=st.range,s=st.stats||{};
   const t=[["Phase",st.phase||"—",st.symbol||""],
     ["Range",r&&r.high!=null?`${(+r.low).toFixed(2)} – ${(+r.high).toFixed(2)}`:"–",`first ${c.orbMinutes} min`],
-    ["Position",p?`${p.side.toUpperCase()} ${(+p.qty).toFixed(3)}`:"flat",p?`@ ${(+p.entry).toFixed(2)} · stop ${(+p.stop).toFixed(3)} · tgt ${(+p.target).toFixed(3)}`:`${st.tradesToday||0}/${c.maxTrades} trades`],
+    ["Position",p?`${p.side.toUpperCase()} ${(+p.qty).toFixed(3)}`:"flat",p?`@ ${(+p.entry).toFixed(2)} · ${p.stop==null?"emergency stop only":p.stopKind+" "+(+p.stop).toFixed(3)} · emerg ${(+p.hard).toFixed(3)}`+(p.tp1?" · trailing":` · target ${(+p.target).toFixed(3)}`):`${st.tradesToday||0}/${c.maxTrades} trades`],
     ["P&L (USDT)",((st.realized||0)+(st.unrealized||0)).toFixed(2),`realized ${(+st.realized||0).toFixed(2)}`+(st.halted?` · HALTED: ${st.halted}`:"")],
     ["Equity",st.equity!=null?(+st.equity).toFixed(2):"–",`${c.leverage}x · $${c.batchUsd} batches · fee ${st.feePct}%/side`],
     ["Speed",`${s.checksPerSec||0} checks/s`,`${s.bookUpdatesPerSec||0} book updates/s · ${s.ordersLastSec||0} orders/s`]];
@@ -872,6 +893,10 @@ function renderTrade(st){
   $("#tpKeyMsg").textContent=k?`${k.exchange} ${k.apiKey}: `+(k.validated?(k.validated.ok?`OK, ${k.validated.usdt??"?"} USDT`:`FAILED (${k.validated.error})`):"not tested"):"no keys set";
   if(st.error)tpErr(st.error);
 }
+function fillCfg(c){CFG_KEYS.forEach(k=>{const el=$("#c-"+k);if(el&&c[k]!=null)el.value=c[k];});}
+$("#tpPresets").addEventListener("click",e=>{const b=e.target.closest("button[data-preset]");if(!b)return;
+  act(async()=>{const r=await tapi("preset","POST",{name:b.dataset.preset});fillCfg(r.config);
+    const n=((TP.st&&TP.st.presets)||{})[b.dataset.preset];$("#tpPresetNote").textContent=n?`${n.label}: ${n.note}`:"";})();});
 $("#tradeBtn").onclick=()=>{TP.open=true;TP.cfgLoaded=false;tpErr("");$("#tradeDlg").showModal();tpPull();};
 $("#tpClose").onclick=()=>$("#tradeDlg").close();
 $("#tradeDlg").addEventListener("close",()=>{TP.open=false;});

@@ -1278,6 +1278,14 @@ async def trade_config(request: Request):
         _fail(e)
 
 
+@app.post("/api/trade/preset", dependencies=[Depends(trade_guard)])
+async def trade_preset(request: Request):
+    try:
+        return {"config": trader.apply_preset((await _body(request)).get("name", ""))}
+    except Exception as e:
+        _fail(e)
+
+
 @app.post("/api/trade/keys", dependencies=[Depends(trade_guard)])
 async def trade_keys(request: Request):
     b = await _body(request)

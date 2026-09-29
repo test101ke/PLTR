@@ -130,14 +130,29 @@ Research scripts (AMD and timeframe replays) live in `research/`.
 The **Trade** button in the top bar opens the Opening Range Breakout trader (`trader.py`). It trades the **PLTR USDT perpetual only**.
 
 - **When:** the range is the first 2 minutes after 09:30 New York (16:30 EAT; 17:30 EAT from 2 Nov to 12 Mar). Trading runs until 15 minutes after the open, then everything is closed.
-- **How:** a break above the range high with the order book leaning to bids goes long; a break below the low with asks leaning goes short. Each trade is a **$100 margin batch at 10x** ($1,000 of PLTR), with a **$1 take-profit after fees** and a **$1 stop including fees**. Up to 10 trades per session. After a win, the same side re-enters on a fresh high or low; after a loss, it waits for price to return inside the range. Every setting is editable in the panel.
-- **Fees:** Bybit 0% per side (VIP), Binance 0.05% per side. $1 net on $1,000 needs a 0.10% move on Bybit and 0.20% on Binance.
-- **Speed:** the agent re-checks the live order book (WebSocket, REST fallback) 5 to 20 times a second. Orders are capped at 20 in any one second. There is no minimum trade rate: it only trades on a signal.
-- **Paper mode (default):** live order book from the exchange, simulated fills at the touch plus slippage and fees. No keys needed. Starting capital $700.
-- **Live mode:** enter API keys in the panel (Bybit, Binance, OKX, Bitget), test them, then press **Go live** and type `LIVE`. Live is armed for one session only. **Stop & flatten** cancels orders and closes the position. Trading halts at a 3% daily loss.
-- **AI supervisor:** before each entry it can skip it or shrink it, and it can order an exit. It cannot open or enlarge trades.
-- **Security:** keys stay in server memory only (never on disk, never sent back to the browser) and are forgotten on restart; or set `EXCHANGE_ID`, `EXCHANGE_API_KEY`, `EXCHANGE_API_SECRET`. Make keys **trade-only, withdrawals off, IP-restricted**. Trade endpoints answer only to this machine unless you set `TRADE_TOKEN`, which the panel then asks for. On Render, set `TRADE_TOKEN`.
-- Every closed trade is logged to `logs/outcomes.jsonl` (`kind: orb_trade`, with the mode).
+- **Entry:** a break above the range high with the order book leaning to bids goes long; a break below the low with asks leaning goes short. Each trade is a **$100 margin batch at 10x** ($1,000 of PLTR), up to 10 per session, with a 5-second wait after each exit so it never buys the top of the spike it just sold.
+- **Fees:** assumed **0.06% per side on both exchanges (0.12% round trip)**, the worst case, so results are never flattered. $1 net on $1,000 therefore needs a 0.22% move.
+- **Exits (one-tap presets in the panel, every value editable):**
+
+| Preset | First target | Then | Stop |
+|---|---|---|---|
+| Scalp | $1 net, close all | – | $1.50 incl. fees, instant |
+| **Runner** (default) | $1 net, bank 50% | trail 0.15% behind the best price | half the opening range, ignored for 3s, must hold 0.5s; break-even at +$0.60 |
+| Wick-proof | $1 net, bank 30% | trail 0.25% | full opening range, ignored for 10s, must hold 1s; break-even at +$0.50 |
+| Burst | +$0.50 arms the trail, nothing banked | trail 0.08% | half the range, ignored for 2s, must hold 0.3s; break-even at +$0.40 |
+
+  Profit is **not capped at $1**: past the first target the rest trails, so a 0.2%-a-second spike is ridden. An **emergency stop (default 1% from entry) is always on** and fires instantly, even during the grace period. At 10x a ~10% move liquidates, so trading with no stop is not offered.
+- **Speed:** re-checks the live order book (WebSocket, REST fallback) 5 to 20 times a second. Orders are capped at 20 in any one second. No minimum trade rate.
+- **Paper mode (default):** live order book, simulated fills at the touch plus slippage and fees, $700 start. **Live mode:** enter and test API keys, press **Go live**, type `LIVE`; armed for one session. **Stop & flatten** closes everything. Trading halts at a 3% daily loss.
+- **AI supervisor:** gives a direction-free market risk: `elevated` halves new batches, `halt` blocks entries and closes the position. It never opens or enlarges trades.
+- **Security:** keys stay in server memory only and are forgotten on restart (or set `EXCHANGE_ID`, `EXCHANGE_API_KEY`, `EXCHANGE_API_SECRET`). Make keys **trade-only, withdrawals off, IP-restricted**. Trade endpoints answer only to this machine unless `TRADE_TOKEN` is set.
+- Every trade (and partial exit) is logged to `logs/outcomes.jsonl` (`kind: orb_trade`).
+
+### Running the trader on Render
+- `render.yaml` pins the **Frankfurt** region: Binance and Bybit refuse US connections, and Render's default is Oregon.
+- Set **`TRADE_TOKEN`**, or the Trade panel stays locked (the server is public).
+- The **free plan sleeps** when idle, and a sleeping server misses 16:30. Use a paid always-on plan for trading.
+- Every deploy or restart forgets keys entered in the panel and stops the trader. Re-enter them, or use the `EXCHANGE_*` env vars (then set IP restrictions on the key to Render's outbound IPs).
 
 ## Endpoints
 - `/` dashboard · `/api/state` full JSON state · `/api/amd` AMD payload · `/api/filings` insiders + congress · `/api/backtest` edge study · `/healthz` health check.

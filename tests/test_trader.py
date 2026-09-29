@@ -89,44 +89,37 @@ def _range(strat, lo=99.9, hi=100.1):
         strat.on_tick(at(i * 3), m - 0.01, m + 0.01, 50)
 
 
-def test_bybit_batch_makes_one_dollar_net_then_continues():
-    c = cfg(exchange="bybit")                          # 0% fees
-    s = tr.OrbStrategy(c, 700.0)
+def preset(name, **kw):
+    p = {k: v for k, v in tr.PRESETS[name].items() if k not in ("label", "note")}
+    return cfg(**{**p, **kw})
+
+
+def test_fees_assume_worst_case_0_06_per_side():
+    assert tr.fee_pct(cfg(exchange="bybit")) == 0.06 and tr.fee_pct(cfg(exchange="binanceusdm")) == 0.06
+
+
+def test_scalp_nets_one_dollar_after_0_12_round_trip():
+    s = tr.OrbStrategy(preset("scalp"), 700.0)
     _range(s)
     acts = s.on_tick(at(200), 100.29, 100.31, 60)
     assert acts and acts[0][:2] == ("open", "long"), acts
-    qty = s.size(700, 100.31)
-    assert abs(qty * 100.31 - 1000) < 1e-6, "a $100 batch at 10x must be $1,000 of PLTR"
-    s.opened("long", qty, 100.31, at(200))
-    assert abs((s.pos["target"] - 100.31) / 100.31 - 0.001) < 1e-9, "$1 on $1,000 is a 0.10% move with no fees"
-    assert s.on_tick(at(210), s.pos["target"], s.pos["target"] + 0.02, 60) == [("close", "target")]
-    pnl = s.closed(s.pos["target"], 0.0)
-    assert abs(pnl - 1.0) < 1e-6
-    # continuation: a fresh high beyond the exit re-arms the long side
-    assert s.on_tick(at(215), 100.40, 100.41, 60) == [], "no re-entry at the same level"
-    acts = s.on_tick(at(220), 100.45, 100.47, 60)
-    assert acts and acts[0][:2] == ("open", "long"), acts
-
-
-def test_binance_fees_are_inside_the_dollar():
-    c = cfg(exchange="binanceusdm")                    # 0.05% a side
-    s = tr.OrbStrategy(c, 700.0)
-    _range(s)
     qty = s.size(700, 100.0)
-    s.opened("long", qty, 100.0, at(200))
-    assert abs((s.pos["target"] - 100.0) / 100.0 - 0.002) < 1e-9, "Binance needs 0.20% for $1 net"
-    fees = 2 * 100.0 * qty * 0.05 / 100
-    assert abs(s.closed(s.pos["target"], fees) - 1.0) < 1e-6
+    assert abs(qty * 100.0 - 1000) < 1e-6, "a $100 batch at 10x must be $1,000 of PLTR"
+    fee = 100.0 * qty * 0.06 / 100
+    s.opened("long", qty, 100.0, at(200), fee)
+    assert abs((s.pos["target"] - 100.0) / 100.0 - 0.0022) < 1e-9, "$1 net + $1.20 fees on $1,000 = 0.22%"
+    assert s.on_tick(at(205), 100.2201, 100.2401, 60) == [("close", "target")]
+    assert abs(s.closed(100.22, fee) - 1.0) < 1e-6
 
 
-def test_stop_loses_about_a_dollar():
-    s = tr.OrbStrategy(cfg(exchange="bybit"), 700.0)
+def test_scalp_stop_loses_its_dollar_and_a_half():
+    s = tr.OrbStrategy(preset("scalp"), 700.0)
     _range(s)
-    s.on_tick(at(200), 99.69, 99.71, 40)
-    qty = s.size(700, 99.69)
-    s.opened("short", qty, 99.69, at(200))
-    assert s.on_tick(at(205), s.pos["stop"] - 0.02, s.pos["stop"], 40) == [("close", "stop")]
-    assert abs(s.closed(s.pos["stop"], 0.0) + 1.0) < 1e-6
+    qty = s.size(700, 100.0); fee = 100.0 * qty * 0.06 / 100
+    s.opened("short", qty, 100.0, at(200), fee)
+    st = s.pos["stop"]
+    assert s.on_tick(at(205), st, st + 0.02, 40) == [("close", "stop")]
+    assert abs(s.closed(st + 0.0, st * qty * 0.06 / 100) + 1.5) < 0.01
 
 
 def test_no_trades_outside_first_15_minutes_and_forced_exit():
@@ -150,11 +143,85 @@ def test_daily_loss_limit_halts():
     assert s.on_tick(at(200), 100.29, 100.31, 70) == [] and s.halted == "daily loss limit"
 
 
-def test_ai_can_block_and_shrink_but_not_grow():
+def test_ai_market_risk_blocks_halves_and_exits_but_never_grows():
     s = tr.OrbStrategy(cfg(), 700.0); _range(s)
-    assert s.on_tick(at(200), 100.29, 100.31, 70, {"action": "stand_aside"}) == []
-    assert abs(s.size(700, 100, {"action": "reduce", "size": 0.5}) - 5.0) < 1e-9
-    assert abs(s.size(700, 100, {"action": "go", "size": 3}) - 10.0) < 1e-9
+    assert s.on_tick(at(200), 100.29, 100.31, 70, {"marketRisk": "halt"}) == []
+    assert abs(s.size(700, 100, {"marketRisk": "elevated"}) - 5.0) < 1e-9
+    assert abs(s.size(700, 100, {"marketRisk": "normal", "size": 3}) - 10.0) < 1e-9
+    # a direction call about the rule trade must NOT block an ORB entry
+    assert s.on_tick(at(201), 100.29, 100.31, 70, {"action": "stand_aside", "marketRisk": "normal"})
+    s.opened("long", 10, 100.3, at(201))
+    assert s.on_tick(at(202), 100.3, 100.32, 70, {"marketRisk": "halt"}) == [("close", "AI risk-off")]
+
+
+# ------------------------------------------------------------------ exit scenarios (paper fills)
+def simulate(c, path, side="long"):
+    """Run a price path (seconds after open, mid) through the agent with paper fills.
+    Returns total P&L in USDT after fees and slippage."""
+    async def go():
+        a = _agent(FakeFeed(), **c)
+        a.broker = tr.PaperBroker(a.cfg); a.equity = 700.0; a.mode = "paper"
+        a.strategy = tr.OrbStrategy(a.cfg, 700.0); _range(a.strategy)
+        imb = 70 if side == "long" else 30
+        for sec, mid in path:
+            a.book = {"bid": mid - 0.005, "ask": mid + 0.005, "imb": imb}
+            await a._evaluate(at(sec))
+        if a.strategy.pos:                                   # mark anything left at the last price
+            a.book = {"bid": path[-1][1] - 0.005, "ask": path[-1][1] + 0.005, "imb": imb}
+            await a._close("end of test")
+        return a
+    return run(go())
+
+
+def _pnl(a):
+    return round(sum(t["pnl"] for t in a.trades), 3)
+
+
+# entry at ~100.3; one-tick wick to 100.05 (past a $1.5 stop), then a run to 101.0
+WHIPSAW = [(200, 100.30), (200.2, 100.28), (201.0, 100.05), (201.2, 100.25), (203, 100.40),
+           (205, 100.60), (208, 100.80), (212, 101.00), (215, 100.95)]
+# a 0.7% spike within about a second, then a pullback
+SPIKE = [(200, 100.30), (200.25, 100.45), (200.5, 100.65), (200.75, 100.85), (201.0, 101.00),
+         (201.5, 100.98), (202.0, 100.80), (203.0, 100.70)]
+
+
+def test_whipsaw_scalp_is_shaken_out_but_the_others_survive():
+    scalp = simulate(preset("scalp"), WHIPSAW)
+    assert scalp.trades[0]["why"] == "stop" and scalp.trades[0]["pnl"] < -1.4, scalp.trades
+    for name in ("runner", "wickproof", "burst"):
+        a = simulate(preset(name), WHIPSAW)
+        assert a.trades[0]["why"] != "stop" and _pnl(a) > 3.0, (name, a.trades)
+
+
+def test_spike_is_ridden_past_one_dollar_and_the_top_is_not_chased():
+    scalp, runner, burst = (simulate(preset(n), SPIKE) for n in ("scalp", "runner", "burst"))
+    assert [x["why"] for x in scalp.trades] == ["target"], "re-entry cooldown must stop it buying the spike top"
+    assert _pnl(runner) > 2.0 and _pnl(burst) > 2.0, (runner.trades, burst.trades)
+    assert any(x["why"] == "first target (partial)" for x in runner.trades)
+    assert burst.trades[0]["why"] == "trailing stop"
+
+
+def test_emergency_stop_fires_even_during_grace():
+    crash = [(200, 100.30), (200.5, 99.0)]                   # -1.3% inside the 10s grace
+    a = simulate(preset("wickproof"), crash)
+    assert a.trades[0]["why"] == "emergency stop", a.trades
+
+
+def test_break_even_lock_turns_a_reversal_into_a_scratch():
+    path = [(200, 100.30), (203, 100.60), (206, 100.45)] + [(207 + i / 10, 100.43 - i * 0.004) for i in range(10)] \
+        + [(210, 99.90)]                                     # 10 ticks a second, like the live feed
+    a = simulate(preset("runner", breakevenUsd=0.3, takeProfitUsd=5), path)
+    assert a.trades[0]["why"] == "break-even stop" and abs(_pnl(a)) < 0.6, a.trades
+
+
+def test_stop_needs_to_hold_for_confirm_ms():
+    c = preset("runner", graceSec=0, confirmMs=800)
+    s = tr.OrbStrategy(c, 700.0); _range(s)
+    s.opened("long", 10, 100.3, at(200))
+    stop = s.pos["stop"]
+    assert s.on_tick(at(201), stop - 0.01, stop, 70) == []          # breach starts
+    assert s.on_tick(at(201.5), stop - 0.01, stop, 70) == []        # 500ms: not yet
+    assert s.on_tick(at(201.9), stop - 0.01, stop, 70) == [("close", "stop")]
 
 
 def test_pltr_only():
@@ -171,7 +238,7 @@ def test_settings_are_bounded():
 # ------------------------------------------------------------------ paper + live wiring
 def test_paper_round_trip_through_agent():
     async def go():
-        a = _agent(FakeFeed(), exchange="bybit")
+        a = _agent(FakeFeed(), **{k: v for k, v in tr.PRESETS["scalp"].items() if k not in ("label", "note")})
         a.feed_ex = FakeFeed(); a.symbol = "PLTR/USDT:USDT"
         a.broker = tr.PaperBroker(a.cfg); a.equity = 700.0
         a.strategy = tr.OrbStrategy(a.cfg, 700.0); a.mode = "paper"
@@ -184,7 +251,7 @@ def test_paper_round_trip_through_agent():
         await a._evaluate(at(210))
         return a
     a = run(go())
-    assert len(a.trades) == 1 and a.trades[0]["why"] == "target" and a.trades[0]["pnl"] > 0.9
+    assert len(a.trades) == 1 and a.trades[0]["why"] == "target" and a.trades[0]["pnl"] > 0.85
 
 
 class FakeCcxt:

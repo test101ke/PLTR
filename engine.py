@@ -41,9 +41,10 @@ SUP_SCHEMA = {
         "action": {"type": "string", "enum": ["go", "reduce", "stand_aside", "exit"]},
         "size": {"type": "number"},
         "stopPct": {"type": "number"},
+        "marketRisk": {"type": "string", "enum": ["normal", "elevated", "halt"]},
         "reason": {"type": "string"},
     },
-    "required": ["action", "size", "stopPct", "reason"],
+    "required": ["action", "size", "stopPct", "marketRisk", "reason"],
     "additionalProperties": False,
 }
 
@@ -56,7 +57,10 @@ SUP_SYSTEM = (
     "an exit, between 0.3 and 1.5. Reduce or stand aside when fresh, material news conflicts with "
     "the trade direction, when the rule's recent record is weak, or when the market is disorderly "
     "(wide spread, big basis to the stock). Otherwise let the rule trade: do not second-guess it "
-    "on noise. Keep reason under 25 words."
+    "on noise. Separately, set marketRisk for a breakout scalper trading either direction: "
+    "'normal'; 'elevated' (disorderly book, wide spread, conflicting fresh news: trade half size); "
+    "'halt' (a news shock or broken market: no new trades, close open ones). marketRisk must not "
+    "depend on direction. Keep reason under 25 words."
 )
 
 
@@ -266,7 +270,7 @@ class Engine:
                 messages=[{"role": "user", "content": "Wake reason: " + ", ".join(reasons)
                            + "\nState:\n" + json.dumps(ctx, default=str)}])
         except Exception as e:
-            self.ai = {"action": "go", "size": 1.0, "stopPct": STOP_PCT,
+            self.ai = {"action": "go", "size": 1.0, "stopPct": STOP_PCT, "marketRisk": "normal",
                        "reason": f"supervisor unavailable ({type(e).__name__}); rule runs alone", "at": _iso()}
             return
         if resp.stop_reason == "refusal":
@@ -283,7 +287,8 @@ def clamp(text, plan):
     try:
         d = json.loads(text)
     except Exception:
-        return {"action": "go", "size": 1.0, "stopPct": STOP_PCT, "reason": "unparseable answer ignored"}
+        return {"action": "go", "size": 1.0, "stopPct": STOP_PCT, "marketRisk": "normal",
+                "reason": "unparseable answer ignored"}
     action = d.get("action") if d.get("action") in ("go", "reduce", "stand_aside", "exit") else "go"
     if action == "exit" and not plan.get("dir"):
         action = "stand_aside"
@@ -299,7 +304,8 @@ def clamp(text, plan):
         stop = min(STOP_BOUNDS[1], max(STOP_BOUNDS[0], float(d.get("stopPct", STOP_PCT))))
     except (TypeError, ValueError):
         stop = STOP_PCT
-    return {"action": action, "size": round(size, 2), "stopPct": round(stop, 2),
+    risk = d.get("marketRisk") if d.get("marketRisk") in ("normal", "elevated", "halt") else "normal"
+    return {"action": action, "size": round(size, 2), "stopPct": round(stop, 2), "marketRisk": risk,
             "reason": str(d.get("reason", ""))[:200]}
 
 

@@ -2,6 +2,7 @@ services:
   - type: web
     name: pltr-signal-desk
     runtime: python
+    region: frankfurt        # Binance and Bybit block US IPs; Render's default region is Oregon (US)
     plan: free               # deploys without a paid plan; sleeps when idle (upgrade to "starter" for always-on)
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
