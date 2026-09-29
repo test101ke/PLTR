@@ -623,7 +623,9 @@ function renderTrade(st){
     ["Opening range",r&&r.high!=null?`${(+r.low).toFixed(2)} – ${(+r.high).toFixed(2)}`:"–",""],
     ["Position",p?`${p.side.toUpperCase()} ${(+p.qty).toFixed(3)}`:"flat",p?`@ ${(+p.entry).toFixed(2)}`+(p.tp1?" · trailing":""):`${st.tradesToday||0} trades today`],
     ["Open P&L",usd(st.unrealized||0),`speed ${s.checksPerSec||0} checks/s`],
-    ["AI market risk",(st.plan&&st.plan.ai&&st.plan.ai.marketRisk)||"normal",(st.plan&&st.plan.ai&&st.plan.ai.reason)||"supervisor wakes 30 min before the open"]];
+    ["AI market risk",(st.plan&&st.plan.ai&&st.plan.ai.marketRisk)||"normal",(st.plan&&st.plan.ai&&st.plan.ai.reason)||"supervisor wakes 30 min before the open"],
+    ["Rule of the day",(st.plan&&st.plan.dir!=null)?({1:"LONG",[-1]:"SHORT",0:"STAND ASIDE"}[st.plan.dir]):((st.plan&&st.plan.rule)?"waiting":"no rule yet"),
+      (st.plan&&st.plan.rule)?`${st.plan.rule}`+(st.plan.halfLife!=null?` · newest days weighted (half-life ${st.plan.halfLife})`:""):"backtest ranks the rules; newest days count most"]];
   $("#tpTiles").innerHTML=t.map(x=>`<div class="tile"><div class="k">${x[0]}</div><div class="v mono" style="font-size:14px">${esc(String(x[1]))}</div><div class="x">${esc(String(x[2]))}</div></div>`).join("");
   const ev=(st.events||[]).slice().reverse();
   $("#tpEvents").innerHTML=ev.length?ev.map(e=>`<div>${esc(e.at.slice(11,19))}Z ${esc(e.msg)}</div>`).join(""):"No activity yet.";
