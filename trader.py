@@ -66,6 +66,8 @@ import signal_log
 NY = ZoneInfo("America/New_York")
 EAT = ZoneInfo("Africa/Nairobi")
 
+MIN_STOP_PCT = 0.10      # no stop may sit closer to entry than this
+
 # Fee per side, in %, by exchange. Deliberately the worst case for both venues
 # (0.06% a side, 0.12% round trip) so results are never flattered by a VIP rate.
 FEES = {"bybit": 0.06, "binanceusdm": 0.06}
@@ -103,8 +105,9 @@ BOUNDS = {
 
 # One-tap presets. They change exits only; leverage, batch size and risk limits stay yours.
 PRESETS = {
-    "scalp": {"label": "Scalp", "note": "Bank $1 and get out. Tight $1.5 stop, no trailing.",
-              "takeProfitUsd": 1.0, "partialPct": 100, "trailPct": 0, "stopMode": "usd", "stopLossUsd": 1.5,
+    "scalp": {"label": "Scalp", "note": "Bank $1 and get out. $2.20 stop incl. fees (0.10% of price plus the "
+                                        "$1.20 round-trip fee), no trailing.",
+              "takeProfitUsd": 1.0, "partialPct": 100, "trailPct": 0, "stopMode": "usd", "stopLossUsd": 2.2,
               "graceSec": 0, "confirmMs": 0, "breakevenUsd": 0},
     "runner": {"label": "Runner", "note": "Bank half at $1, trail the rest 0.15% behind the best price. Stop at "
                                           "half the opening range, ignored for 3s, needs 0.5s to confirm.",
@@ -320,10 +323,14 @@ class OrbStrategy:
         sgn = 1 if side == "long" else -1
         fees = 2 * price * qty * fee_pct(c) / 100            # round trip, in USDT
         hard = price * (1 - sgn * c["hardStopPct"] / 100)
+        # No stop closer than MIN_STOP_PCT: at 0.12% round-trip fees a "$1.50 incl.
+        # fees" stop on $1,000 left 0.03% of room, and the live-data replay showed
+        # it stopped out almost every trade.
+        floor = price * MIN_STOP_PCT / 100
         if c["stopMode"] == "usd":
-            dist = max((c["stopLossUsd"] - fees) / qty, price * 0.0002)
+            dist = max((c["stopLossUsd"] - fees) / qty, floor)
         elif c["stopMode"] == "range":
-            dist = max(c["rangeStopFrac"] * (self.hi - self.lo), price * 0.0005)
+            dist = max(c["rangeStopFrac"] * (self.hi - self.lo), floor)
         else:
             dist = None                                       # hard: emergency stop only
         stop = None if dist is None else price - sgn * dist

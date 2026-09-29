@@ -111,14 +111,15 @@ def test_scalp_nets_one_dollar_after_0_12_round_trip():
     assert abs(s.closed(100.22, fee) - 1.0) < 1e-6
 
 
-def test_scalp_stop_loses_its_dollar_and_a_half():
+def test_scalp_stop_loses_two_twenty_incl_fees():
     s = tr.OrbStrategy(preset("scalp"), 700.0)
     _range(s)
     qty = s.size(700, 100.0); fee = 100.0 * qty * 0.06 / 100
     s.opened("short", qty, 100.0, at(200), fee)
     st = s.pos["stop"]
     assert s.on_tick(at(205), st, st + 0.02, 40) == [("close", "stop")]
-    assert abs(s.closed(st + 0.0, st * qty * 0.06 / 100) + 1.5) < 0.01
+    assert abs((st - 100.0) / 100.0 - 0.001) < 1e-9, "stop must be the 0.10% floor, not squeezed by fees"
+    assert abs(s.closed(st + 0.0, st * qty * 0.06 / 100) + 2.2) < 0.01
 
 
 def test_no_trades_outside_first_15_minutes_and_forced_exit():
@@ -186,7 +187,7 @@ SPIKE = [(200, 100.30), (200.25, 100.45), (200.5, 100.65), (200.75, 100.85), (20
 
 def test_whipsaw_scalp_is_shaken_out_but_the_others_survive():
     scalp = simulate(preset("scalp"), WHIPSAW)
-    assert scalp.trades[0]["why"] == "stop" and scalp.trades[0]["pnl"] < -1.4, scalp.trades
+    assert scalp.trades[0]["why"] == "stop" and scalp.trades[0]["pnl"] < -2.0, scalp.trades
     for name in ("runner", "wickproof", "burst"):
         a = simulate(preset(name), WHIPSAW)
         assert a.trades[0]["why"] != "stop" and _pnl(a) > 3.0, (name, a.trades)
