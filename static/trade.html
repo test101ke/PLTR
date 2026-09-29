@@ -513,6 +513,7 @@ a.navlink{font-size:13px;font-weight:600;color:var(--accent);text-decoration:non
       <div class="sect-title" style="margin-top:14px"><h2 style="font-size:13px">Exit style</h2></div>
       <div class="row" id="tpPresets"></div>
       <p class="msg" id="tpPresetNote" style="margin:6px 0 0"></p>
+      <div id="orbBt" style="margin-top:10px"></div>
       <details class="adv" style="margin-top:10px"><summary>Strategy details</summary>
         <div class="grid2" style="margin-top:8px">
           <label>Leverage (x)<input id="c-leverage" type="number" min="1" max="20" step="1"></label>
@@ -618,6 +619,7 @@ function renderTrade(st){
     $("#tpPresets").innerHTML=Object.entries(st.presets||{}).map(([k,v])=>`<button class="b" type="button" data-preset="${k}" title="${esc(v.note)}" ${run?"disabled":""}>${esc(v.label)}</button>`).join("");
     errBox("#tpErr",st.error||"");
   }
+  renderOrbBt(st.orbBacktest);
   const p=st.position,r=st.range,s=st.stats||{};
   const t=[["Phase",st.phase||"stopped",st.symbol||"PLTR perp"],
     ["Opening range",r&&r.high!=null?`${(+r.low).toFixed(2)} – ${(+r.high).toFixed(2)}`:"–",""],
@@ -629,6 +631,14 @@ function renderTrade(st){
   $("#tpTiles").innerHTML=t.map(x=>`<div class="tile"><div class="k">${x[0]}</div><div class="v mono" style="font-size:14px">${esc(String(x[1]))}</div><div class="x">${esc(String(x[2]))}</div></div>`).join("");
   const ev=(st.events||[]).slice().reverse();
   $("#tpEvents").innerHTML=ev.length?ev.map(e=>`<div>${esc(e.at.slice(11,19))}Z ${esc(e.msg)}</div>`).join(""):"No activity yet.";
+}
+function renderOrbBt(ob){
+  const el=$("#orbBt");
+  if(!ob||!ob.presets||ob.presets.error){el.innerHTML=`<p class="msg">Preset results on real history appear after the daily backtest runs.</p>`;return;}
+  const rows=Object.values(ob.presets).map(v=>{const a=v.all;const c=x=>x==null?"–":usd(x);
+    return `<tr><td>${esc(v.label)}</td><td class="n">${a.trades}</td><td class="n">${a.winRate==null?"–":a.winRate+"%"}</td><td class="n" style="color:var(--${(a.perTrade||0)>0?"up":"down"})">${c(a.perTrade)}</td><td class="n" style="color:var(--${(a.total||0)>0?"up":"down"})">${c(a.total)}</td></tr>`;}).join("");
+  el.innerHTML=`<p class="msg" style="margin:0 0 4px">Each preset replayed on ${ob.days} real opens (${esc((ob.range||[]).join(" → "))}, ${esc(ob.source||"")}), $100 batch at 10x, after 0.12% fees. The book filter can't be replayed, so live results will differ.</p>
+    <table class="rt"><tr><th>Preset</th><th class="n">Trades</th><th class="n">Win</th><th class="n">Per trade</th><th class="n">Total</th></tr>${rows}</table>`;
 }
 function renderPerf(pf,view,mode){
   const tot=pf.total||0;

@@ -1375,7 +1375,10 @@ async def api_account_delete(request: Request):
 @app.get("/api/trade/status")
 async def trade_status(request: Request):
     t = trader_for(signed_in(request))
+    b = STATE.get("backtest") or {}
     return _json({**t.status(), "user": t.user, "plan": STATE.get("plan") or {},
+                  "orbBacktest": {"presets": b.get("orb"), "source": b.get("source"), "range": b.get("dateRange"),
+                                  "days": b.get("nDays")} if b.get("orb") else None,
                   "keysEncrypted": True, "keysSecretFromEnv": ACCOUNTS.keys_secret_from_env})
 
 

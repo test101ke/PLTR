@@ -111,7 +111,7 @@ The desk runs one trade: the first 15 minutes after the NASDAQ open. That is **1
 
 **Backtest** (`python backtest.py`, re-run daily by the desk, served at `/api/backtest`):
 - Each day records the overnight move, the prior day's change, an event flag (|overnight| >= `BT_EVENT_PCT`%, default 2.5) and the pre-open news score.
-- Rules follow or fade the first 2-minute move, the overnight move, the prior day, or news. Every trade pays `BT_FEE_PCT` (default 0.10%).
+- Rules follow or fade the first 2-minute move, the overnight move, the prior day, or news. Every trade pays `BT_FEE_PCT` (default 0.12% round trip, the 0.06%-a-side worst case). The ORB trader's presets are also replayed on the same candles (`orb_backtest.py`).
 - **Newest days count most.** Each morning the rule is re-picked from past days only, with a day `k` sessions old weighted `0.5^(k/half-life)`. The half-life (10, 20, 40, 80 sessions or equal weights) is chosen on the oldest 70% of days and judged on the newest 30%.
 - It passes only with a 70%+ test hit rate whose 95% floor is above 50%, 20+ test trades, and a profit after fees.
 

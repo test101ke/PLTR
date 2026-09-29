@@ -110,6 +110,14 @@ def test_adaptive_follows_regime_switch():
         assert ad["test"]["total"] > 0 > fixed["testTotalPct"], "recency weighting should beat the stale fixed rule"
 
 
+def test_orb_replay_loses_on_noise_and_wins_on_trend():
+    import orb_backtest as ob
+    noise, trend = ob.study(synth(0.0, 3, 120)), ob.study(synth(0.0012, 3, 120))
+    for k in noise:
+        assert noise[k]["all"]["total"] < 0, f"{k} made money on pure noise after fees"
+    assert all(trend[k]["all"]["total"] > 0 for k in ("runner", "wickproof", "burst")), trend
+
+
 if __name__ == "__main__":
     fails = 0
     for name, fn in list(globals().items()):
