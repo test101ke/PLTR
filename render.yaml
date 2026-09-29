@@ -18,6 +18,8 @@ services:
         value: claude-opus-5-5
       - key: SEC_UA             # "Your Name your@email"; SEC blocks anonymous requests
         sync: false
+      - key: TRADE_TOKEN        # password for the Trade panel; required on a public host
+        sync: false
       - key: X_BEARER_TOKEN      # optional: X/Twitter buzz
         sync: false
       - key: LARGE_TRADE_USD

@@ -321,6 +321,33 @@ h1,h2,h3{margin:0;font-weight:600;letter-spacing:-.02em}
 .foot{margin-top:16px;padding:14px 18px;font-size:11.5px;color:var(--ink-3);line-height:1.55}
 .foot .discl{padding:10px 12px;border-radius:var(--r-md);background:var(--fill);color:var(--ink-2);margin-bottom:9px}
 
+
+/* ---------------- trade panel ---------------- */
+.tradebtn{appearance:none;border:.5px solid var(--line);background:var(--fill);color:var(--ink);height:32px;border-radius:10px;
+  padding:0 11px;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+.tradebtn:hover{background:var(--accent-soft);color:var(--accent)}
+.tradebtn .st{font-size:10.5px;font-weight:700;padding:1px 6px;border-radius:6px;background:var(--fill-2);color:var(--ink-3)}
+.tradebtn .st.paper{background:var(--accent-soft);color:var(--accent)}
+.tradebtn .st.live{background:var(--down);color:#fff}
+dialog.tp{border:.5px solid var(--line);border-radius:var(--r-lg);background:var(--card-solid);color:var(--ink);
+  width:min(760px,calc(100vw - 32px));max-height:calc(100dvh - 32px);padding:0;box-shadow:var(--shadow)}
+dialog.tp::backdrop{background:rgba(0,0,0,.45)}
+.tp-h{display:flex;align-items:center;gap:10px;padding:16px 18px;border-bottom:.5px solid var(--line);position:sticky;top:0;background:var(--card-solid);z-index:1}
+.tp-h h3{margin:0;font-size:16px}.tp-b{padding:14px 18px 18px;overflow:auto}
+.tp fieldset{border:0;padding:0;margin:0 0 14px}
+.tp legend{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);margin-bottom:8px}
+.tp .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}
+.tp label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--ink-2)}
+.tp input,.tp select{font:inherit;font-size:13px;padding:7px 9px;border-radius:var(--r-sm);border:.5px solid var(--line);background:var(--fill);color:var(--ink);min-width:0}
+.tp .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.tp button.b{appearance:none;font:inherit;font-size:13px;font-weight:600;border-radius:var(--r-sm);padding:8px 13px;cursor:pointer;border:.5px solid var(--line);background:var(--fill);color:var(--ink)}
+.tp button.b.pri{background:var(--accent);color:#fff;border-color:transparent}
+.tp button.b.live{background:var(--down);color:#fff;border-color:transparent}
+.tp button.b:disabled{opacity:.45;cursor:not-allowed}
+.tp .msg{font-size:12.5px;color:var(--ink-2);line-height:1.45}
+.tp .msg.err{color:var(--down)}
+.tp .ev{font-family:ui-monospace,monospace;font-size:11.5px;color:var(--ink-2);max-height:180px;overflow:auto;background:var(--fill);border-radius:var(--r-sm);padding:8px 10px;line-height:1.55}
+
 /* ---------------- responsive ---------------- */
 @media (max-width:1080px){
   .grid{grid-template-columns:1fr}
@@ -410,6 +437,7 @@ h1,h2,h3{margin:0;font-weight:600;letter-spacing:-.02em}
         <span class="live"><span class="dot" id="liveDot"></span><span id="connLabel">connecting…</span></span>
         <span id="updated">—</span>
       </div>
+      <button class="tradebtn" id="tradeBtn" type="button" aria-haspopup="dialog">Trade <span class="st" id="tradeSt">off</span></button>
       <button class="tbtn" id="themeBtn" title="Toggle appearance" aria-label="Toggle appearance">◐</button>
     </div>
   </header>
@@ -503,6 +531,65 @@ h1,h2,h3{margin:0;font-weight:600;letter-spacing:-.02em}
     <div id="footMeta" class="muted">—</div>
   </footer>
 </div>
+
+<dialog class="tp" id="tradeDlg" aria-labelledby="tpTitle">
+  <div class="tp-h"><h3 id="tpTitle">ORB trader · US open 16:30 EAT</h3><span class="chip tiny" id="tpMode">off</span>
+    <div class="sp" style="flex:1"></div><button class="tbtn" type="button" id="tpClose" aria-label="Close">✕</button></div>
+  <div class="tp-b">
+    <div class="msg err" id="tpErr" hidden></div>
+    <fieldset id="tpTokenBox" hidden><legend>Access</legend>
+      <div class="row"><label style="flex:1">Trade token (TRADE_TOKEN on the server)<input id="tpToken" type="password" autocomplete="off"></label>
+      <button class="b" type="button" id="tpTokenSave">Unlock</button></div></fieldset>
+
+    <fieldset><legend>Run</legend>
+      <div class="row">
+        <button class="b pri" type="button" id="tpPaper">Start paper</button>
+        <button class="b live" type="button" id="tpLive">Go live…</button>
+        <button class="b" type="button" id="tpStop">Stop &amp; flatten</button>
+      </div>
+      <p class="msg" style="margin:8px 0 0">Paper uses the exchange's live order book and simulates fills with fees and slippage. Live sends real orders with your keys and must be armed each day.</p>
+    </fieldset>
+
+    <fieldset><legend>Status</legend>
+      <div class="tiles" id="tpTiles"></div>
+      <div class="ev" id="tpEvents" style="margin-top:9px">No activity yet.</div>
+    </fieldset>
+
+    <fieldset><legend>Strategy</legend>
+      <div class="grid2">
+        <label>Leverage (x)<input id="c-leverage" type="number" min="1" max="20" step="1"></label>
+        <label>Batch margin per trade (USDT)<input id="c-batchUsd" type="number" min="0" step="10"></label>
+        <label>Take profit per batch, net (USDT)<input id="c-takeProfitUsd" type="number" min="0" step="0.1"></label>
+        <label>Stop loss per batch, incl. fees (USDT)<input id="c-stopLossUsd" type="number" min="0" step="0.1"></label>
+        <label>Fee per side % (-1 = exchange rate)<input id="c-takerFeePct" type="number" min="-1" max="1" step="0.01"></label>
+        <label>Opening range (min)<input id="c-orbMinutes" type="number" min="1" max="15" step="1"></label>
+        <label>Max trades per session<input id="c-maxTrades" type="number" min="1" max="10" step="1"></label>
+        <label>Breakout buffer (%)<input id="c-bufferPct" type="number" min="0" max="1" step="0.01"></label>
+        <label>Book lean needed (%)<input id="c-imbalanceMin" type="number" min="50" max="90" step="1"></label>
+        <label>Close all after (min)<input id="c-exitAfterMin" type="number" min="5" max="390" step="5"></label>
+        <label>Daily loss stop (% equity)<input id="c-dailyLossPct" type="number" min="0.5" max="20" step="0.5"></label>
+        <label>Max position (USDT)<input id="c-maxNotional" type="number" min="10" step="100"></label>
+        <label>Book checks per second (5-20)<input id="c-tickHz" type="number" min="5" max="20" step="1"></label>
+        <label>Max orders per second (≤20)<input id="c-maxOrdersPerSec" type="number" min="1" max="20" step="1"></label>
+        <label>Paper equity (USDT)<input id="c-paperEquity" type="number" min="10" step="100"></label>
+        <label>Paper exchange (market data)<select id="c-exchange"><option value="bybit">Bybit (0% fee)</option><option value="binanceusdm">Binance futures (0.05%/side)</option></select></label>
+      </div>
+      <div class="row" style="margin-top:9px"><button class="b" type="button" id="tpSaveCfg">Save settings</button><span class="msg" id="tpCfgMsg"></span></div>
+    </fieldset>
+
+    <fieldset><legend>Exchange API keys (live only)</legend>
+      <div class="grid2">
+        <label>Exchange<select id="k-exchange"><option value="bybit">Bybit</option><option value="binanceusdm">Binance futures (USDⓈ-M)</option><option value="okx">OKX</option><option value="bitget">Bitget</option></select></label>
+        <label>API key<input id="k-apiKey" autocomplete="off" spellcheck="false"></label>
+        <label>Secret<input id="k-secret" type="password" autocomplete="off"></label>
+        <label>Passphrase (OKX/Bitget)<input id="k-password" type="password" autocomplete="off"></label>
+      </div>
+      <div class="row" style="margin-top:9px"><button class="b" type="button" id="tpSaveKeys">Save &amp; test keys</button>
+        <button class="b" type="button" id="tpClearKeys">Forget keys</button><span class="msg" id="tpKeyMsg"></span></div>
+      <p class="msg" style="margin:8px 0 0">Keys stay in server memory only (never saved to disk or shown again) and are forgotten on restart. Create them with <b>trading only, withdrawals off</b>, and restrict them to this machine's IP.</p>
+    </fieldset>
+  </div>
+</dialog>
 
 <script>
 const $=(s,r=document)=>r.querySelector(s),$$=(s,r=document)=>[...r.querySelectorAll(s)];
@@ -746,6 +833,65 @@ function renderBacktest(bt){
 
 function esc(s){return(s||"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
 function fmtPub(p){if(!p)return"";const t=Date.parse(p);return isNaN(t)?"":ago(t)+" ago";}
+
+/* ---------- ORB trader panel ---------- */
+const TP={open:false,st:null,token:""};
+try{TP.token=sessionStorage.getItem("pltr-trade-token")||"";}catch(e){}
+async function tapi(path,method="GET",body){
+  const r=await fetch("/api/trade/"+path,{method,cache:"no-store",headers:{"Content-Type":"application/json",...(TP.token?{"X-Trade-Token":TP.token}:{})},body:body?JSON.stringify(body):undefined});
+  let j={};try{j=await r.json();}catch(e){}
+  if(!r.ok)throw Object.assign(new Error(j.detail||("HTTP "+r.status)),{status:r.status});
+  return j;
+}
+function tpErr(m){const e=$("#tpErr");e.hidden=!m;e.textContent=m||"";}
+const CFG_KEYS=["leverage","batchUsd","takeProfitUsd","stopLossUsd","takerFeePct","orbMinutes","maxTrades","bufferPct","imbalanceMin","exitAfterMin","dailyLossPct","maxNotional","tickHz","maxOrdersPerSec","paperEquity","exchange"];
+async function tpPull(){
+  try{const st=await tapi("status");TP.st=st;$("#tpTokenBox").hidden=true;renderTrade(st);}
+  catch(e){const b=$("#tradeSt");b.textContent=e.status===403?"locked":"—";b.className="st";
+    if(TP.open&&e.status===403){$("#tpTokenBox").hidden=false;tpErr(e.message);}}
+}
+function renderTrade(st){
+  const b=$("#tradeSt"),m=st.mode;b.textContent=m==="live"?"LIVE":m==="paper"?"paper":"off";b.className="st "+(m==="off"?"":m);
+  if(!TP.open)return;
+  const mc=$("#tpMode");mc.textContent=m==="live"?"LIVE · real money":m==="paper"?"paper":"off";mc.className="chip tiny "+(m==="live"?"down":m==="paper"?"flat":"");
+  $("#tpTitle").textContent=`ORB trader · US open ${st.openEAT||"16:30"} EAT`;
+  const run=m!=="off";$("#tpPaper").disabled=run;$("#tpLive").disabled=run;$("#tpStop").disabled=!run;$("#tpSaveCfg").disabled=run;
+  const c=st.config||{};
+  if(!TP.cfgLoaded){CFG_KEYS.forEach(k=>{const el=$("#c-"+k);if(el&&c[k]!=null)el.value=c[k];});TP.cfgLoaded=true;}
+  const p=st.position,r=st.range,s=st.stats||{};
+  const t=[["Phase",st.phase||"—",st.symbol||""],
+    ["Range",r&&r.high!=null?`${(+r.low).toFixed(2)} – ${(+r.high).toFixed(2)}`:"–",`first ${c.orbMinutes} min`],
+    ["Position",p?`${p.side.toUpperCase()} ${(+p.qty).toFixed(3)}`:"flat",p?`@ ${(+p.entry).toFixed(2)} · stop ${(+p.stop).toFixed(3)} · tgt ${(+p.target).toFixed(3)}`:`${st.tradesToday||0}/${c.maxTrades} trades`],
+    ["P&L (USDT)",((st.realized||0)+(st.unrealized||0)).toFixed(2),`realized ${(+st.realized||0).toFixed(2)}`+(st.halted?` · HALTED: ${st.halted}`:"")],
+    ["Equity",st.equity!=null?(+st.equity).toFixed(2):"–",`${c.leverage}x · $${c.batchUsd} batches · fee ${st.feePct}%/side`],
+    ["Speed",`${s.checksPerSec||0} checks/s`,`${s.bookUpdatesPerSec||0} book updates/s · ${s.ordersLastSec||0} orders/s`]];
+  $("#tpTiles").innerHTML=t.map(x=>`<div class="tile"><div class="k">${x[0]}</div><div class="v mono" style="font-size:14px">${esc(String(x[1]))}</div><div class="x">${esc(String(x[2]))}</div></div>`).join("");
+  const ev=(st.events||[]).slice().reverse();
+  $("#tpEvents").innerHTML=ev.length?ev.map(e=>`<div>${esc(e.at.slice(11,19))}Z ${esc(e.msg)}</div>`).join(""):"No activity yet.";
+  const k=st.keys;
+  $("#tpKeyMsg").textContent=k?`${k.exchange} ${k.apiKey}: `+(k.validated?(k.validated.ok?`OK, ${k.validated.usdt??"?"} USDT`:`FAILED (${k.validated.error})`):"not tested"):"no keys set";
+  if(st.error)tpErr(st.error);
+}
+$("#tradeBtn").onclick=()=>{TP.open=true;TP.cfgLoaded=false;tpErr("");$("#tradeDlg").showModal();tpPull();};
+$("#tpClose").onclick=()=>$("#tradeDlg").close();
+$("#tradeDlg").addEventListener("close",()=>{TP.open=false;});
+$("#tpTokenSave").onclick=()=>{TP.token=$("#tpToken").value.trim();try{sessionStorage.setItem("pltr-trade-token",TP.token);}catch(e){}tpErr("");tpPull();};
+const act=fn=>async()=>{tpErr("");try{await fn();}catch(e){tpErr(e.message);}tpPull();};
+$("#tpSaveCfg").onclick=act(async()=>{const cfg={};CFG_KEYS.forEach(k=>{const el=$("#c-"+k);if(el)cfg[k]=el.value;});
+  const r=await tapi("config","POST",cfg);CFG_KEYS.forEach(k=>{const el=$("#c-"+k);if(el&&r.config[k]!=null)el.value=r.config[k];});$("#tpCfgMsg").textContent="saved";});
+$("#tpSaveKeys").onclick=act(async()=>{$("#tpKeyMsg").textContent="testing…";
+  await tapi("keys","POST",{exchange:$("#k-exchange").value,apiKey:$("#k-apiKey").value,secret:$("#k-secret").value,password:$("#k-password").value});
+  $("#k-secret").value="";$("#k-password").value="";});
+$("#tpClearKeys").onclick=act(()=>tapi("keys","DELETE"));
+$("#tpPaper").onclick=act(()=>tapi("start","POST",{mode:"paper"}));
+$("#tpLive").onclick=act(async()=>{const c=(TP.st&&TP.st.config)||{};
+  const typed=prompt(`REAL MONEY. ${c.leverage}x leverage, $${c.batchUsd} margin per trade, up to ${c.maxTrades} trades, daily loss stop ${c.dailyLossPct}%.\nType LIVE to arm for today's session:`);
+  if(typed!=="LIVE")throw new Error("not armed (you must type LIVE)");
+  await tapi("start","POST",{mode:"live",confirm:"LIVE"});});
+$("#tpStop").onclick=act(()=>tapi("stop","POST"));
+tpPull();
+setInterval(()=>{if(!TP.open)tpPull();},3000);
+setInterval(()=>{if(TP.open)tpPull();},1000);
 
 tick();setInterval(tick,1000);
 </script>

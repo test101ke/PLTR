@@ -121,9 +121,23 @@ The desk runs one trade: the first 15 minutes after the NASDAQ open. That is **1
 
 **News** (`newsfeed.py` + `google_news.py`): SEC EDGAR (set `SEC_UA` to "Your Name your@email", SEC blocks anonymous requests), Yahoo, Nasdaq, Seeking Alpha and Google News. Reworded copies of one story are folded together and count more the more outlets carry them. StockTwits is shown but never counted. The score halves every 6 hours of age. Each source's health is shown under the news feed.
 
-**Tests** (offline, no internet): `python tests/test_backtest.py`, `python tests/test_engine.py`, `python tests/test_news.py`.
+**Tests** (offline, no internet): `python tests/test_backtest.py`, `tests/test_engine.py`, `tests/test_news.py`, `tests/test_trader.py`.
 
 Research scripts (AMD and timeframe replays) live in `research/`.
+
+## Live trade button (ORB at the open)
+
+The **Trade** button in the top bar opens the Opening Range Breakout trader (`trader.py`). It trades the **PLTR USDT perpetual only**.
+
+- **When:** the range is the first 2 minutes after 09:30 New York (16:30 EAT; 17:30 EAT from 2 Nov to 12 Mar). Trading runs until 15 minutes after the open, then everything is closed.
+- **How:** a break above the range high with the order book leaning to bids goes long; a break below the low with asks leaning goes short. Each trade is a **$100 margin batch at 10x** ($1,000 of PLTR), with a **$1 take-profit after fees** and a **$1 stop including fees**. Up to 10 trades per session. After a win, the same side re-enters on a fresh high or low; after a loss, it waits for price to return inside the range. Every setting is editable in the panel.
+- **Fees:** Bybit 0% per side (VIP), Binance 0.05% per side. $1 net on $1,000 needs a 0.10% move on Bybit and 0.20% on Binance.
+- **Speed:** the agent re-checks the live order book (WebSocket, REST fallback) 5 to 20 times a second. Orders are capped at 20 in any one second. There is no minimum trade rate: it only trades on a signal.
+- **Paper mode (default):** live order book from the exchange, simulated fills at the touch plus slippage and fees. No keys needed. Starting capital $700.
+- **Live mode:** enter API keys in the panel (Bybit, Binance, OKX, Bitget), test them, then press **Go live** and type `LIVE`. Live is armed for one session only. **Stop & flatten** cancels orders and closes the position. Trading halts at a 3% daily loss.
+- **AI supervisor:** before each entry it can skip it or shrink it, and it can order an exit. It cannot open or enlarge trades.
+- **Security:** keys stay in server memory only (never on disk, never sent back to the browser) and are forgotten on restart; or set `EXCHANGE_ID`, `EXCHANGE_API_KEY`, `EXCHANGE_API_SECRET`. Make keys **trade-only, withdrawals off, IP-restricted**. Trade endpoints answer only to this machine unless you set `TRADE_TOKEN`, which the panel then asks for. On Render, set `TRADE_TOKEN`.
+- Every closed trade is logged to `logs/outcomes.jsonl` (`kind: orb_trade`, with the mode).
 
 ## Endpoints
 - `/` dashboard · `/api/state` full JSON state · `/api/amd` AMD payload · `/api/filings` insiders + congress · `/api/backtest` edge study · `/healthz` health check.

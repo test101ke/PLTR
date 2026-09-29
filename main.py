@@ -30,7 +30,8 @@ Env vars (all optional except where noted):
 import os, asyncio, time, math, json, contextlib, datetime as dt
 from typing import Any, Optional
 import httpx
-from fastapi import FastAPI
+import hmac
+from fastapi import FastAPI, Request, HTTPException, Depends
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 import backtest as bt
@@ -41,6 +42,7 @@ import google_news
 import filings as filinglib
 import signal_log
 import engine as engine_mod
+import trader as trader_mod
 import anthropic
 
 # ---------------------------------------------------------------- config
@@ -86,6 +88,7 @@ _LIVE = deque(maxlen=1400)   # (epoch_seconds, mark_price) for short-timeframe s
 _ROT = {"i": 0, "live": []}  # rotating exchange price pool
 AMD = {}                     # full AMD / Power-of-3 payload (served at /api/amd)
 engine = engine_mod.Engine()
+trader = trader_mod.TradeAgent(get_ai=lambda: engine.ai)
 _AI = anthropic.AsyncAnthropic(api_key=CFG["ANTHROPIC_API_KEY"]) if CFG["ANTHROPIC_API_KEY"] else None
 _GOOGLE: list[dict] = []     # newest Google News scrape, refreshed on its own 5-min loop
 
@@ -1168,6 +1171,8 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
+        if trader.mode != "off":
+            await trader.stop("server shutting down")
         for t in tasks:
             t.cancel()
         await _client.aclose()
@@ -1231,6 +1236,81 @@ async def api_backtest():
 async def api_backtest_run():
     asyncio.create_task(run_backtest_job())
     return {"started": True}
+
+
+# ============================================================ TRADING (ORB, trader.py)
+def trade_guard(request: Request):
+    """Trading endpoints move money. With TRADE_TOKEN set, every call must carry it
+    in X-Trade-Token. Without it, only this machine itself may call them: the desk
+    binds 0.0.0.0, so anyone on the network could otherwise reach them."""
+    token = os.getenv("TRADE_TOKEN", "")
+    if token:
+        if not hmac.compare_digest(request.headers.get("x-trade-token", ""), token):
+            raise HTTPException(403, "trade token required")
+        return
+    host = request.client.host if request.client else ""
+    if host not in ("127.0.0.1", "::1") or request.headers.get("x-forwarded-for"):
+        raise HTTPException(403, "trading is limited to localhost; set TRADE_TOKEN to use it remotely")
+
+
+async def _body(request: Request) -> dict:
+    try:
+        return await request.json()
+    except Exception:
+        return {}
+
+
+def _fail(e: Exception):
+    code = 403 if isinstance(e, PermissionError) else 400
+    raise HTTPException(code, str(e))
+
+
+@app.get("/api/trade/status", dependencies=[Depends(trade_guard)])
+async def trade_status():
+    return JSONResponse(json.loads(json.dumps(trader.status(), default=str)))
+
+
+@app.post("/api/trade/config", dependencies=[Depends(trade_guard)])
+async def trade_config(request: Request):
+    try:
+        return {"config": trader.configure(await _body(request))}
+    except Exception as e:
+        _fail(e)
+
+
+@app.post("/api/trade/keys", dependencies=[Depends(trade_guard)])
+async def trade_keys(request: Request):
+    b = await _body(request)
+    if not (b.get("exchange") and b.get("apiKey") and b.get("secret")):
+        raise HTTPException(400, "exchange, apiKey and secret are required")
+    if trader.mode == "live":
+        raise HTTPException(400, "stop live trading before changing keys")
+    trader.keys.set(b["exchange"], b["apiKey"], b["secret"], b.get("password", ""))
+    await trader.validate_keys()
+    return {"keys": trader.keys.masked()}
+
+
+@app.delete("/api/trade/keys", dependencies=[Depends(trade_guard)])
+async def trade_keys_clear():
+    if trader.mode == "live":
+        raise HTTPException(400, "stop live trading first")
+    trader.keys.clear()
+    return {"keys": None}
+
+
+@app.post("/api/trade/start", dependencies=[Depends(trade_guard)])
+async def trade_start(request: Request):
+    b = await _body(request)
+    try:
+        return JSONResponse(json.loads(json.dumps(await trader.start(b.get("mode", "paper"), b.get("confirm", "")),
+                                                  default=str)))
+    except Exception as e:
+        _fail(e)
+
+
+@app.post("/api/trade/stop", dependencies=[Depends(trade_guard)])
+async def trade_stop():
+    return JSONResponse(json.loads(json.dumps(await trader.stop("kill switch"), default=str)))
 
 
 @app.get("/healthz")

@@ -1,0 +1,614 @@
+"""
+Opening Range Breakout (ORB) trader for the PLTR perpetual at the US open.
+==========================================================================
+Trades the PLTR USDT perpetual only.
+
+Default plan (from the account owner): $700 capital, $100 margin batches at
+10x, several small trades in the first 15 minutes, aiming at $1 net per batch
+after fees. Fees per side: Bybit 0% (VIP), Binance 0.05%. At 10x a $100 batch
+is $1,000 of PLTR, so $1 net needs a 0.10% move on Bybit but 0.20% on Binance,
+where the round-trip fee alone is $1.
+
+Timing: the opening range starts at 09:30:00 New York, which is 16:30 EAT
+(17:30 EAT from 2 Nov 2026 to 12 Mar 2027, US winter time).
+
+Strategy (per session):
+  1. For the first `orbMinutes` after the open, record the high and low of the
+     mid price from the live order book. That is the opening range.
+  2. After it, go LONG when the mid breaks above the high by `bufferPct` and the
+     book leans to bids (bid share >= `imbalanceMin`%), or SHORT when it breaks
+     below the low with the book leaning to asks.
+  3. Take profit at `takeProfitUsd` net of fees; stop at `stopLossUsd`
+     including fees (either set to 0 falls back to targetR x risk / the range
+     middle).
+  4. Up to `maxTrades` trades. After a winning exit the same side re-arms on a
+     fresh high (long) or low (short) beyond the exit price: that is how it
+     takes several small trades out of one strong move. After a loss it waits
+     for price to come back inside the range.
+  5. Everything is closed `exitAfterMin` minutes after the open, or at once
+     if the day's loss reaches `dailyLossPct`% of starting equity.
+
+Speed: the agent re-checks the book 5 to 20 times a second (`tickHz`), on
+every WebSocket update and on a timer so it never checks less than 5 times a
+second. Orders pass through a token bucket capped at 20 per second. There is
+deliberately NO minimum trade rate: forcing trades without a signal would
+burn the account on fees, doubly so at 10x.
+
+Modes:
+  paper  live market data from the chosen exchange, simulated fills at the
+         touch plus slippage and taker fees. No keys needed. The default.
+  live   real orders with your API keys. Must be armed explicitly each day.
+
+The AI supervisor (engine.py) is consulted before each entry: it can skip the
+entry, shrink it, or order an exit. It can never open or enlarge a trade.
+"""
+import os, time, asyncio, datetime as dt
+from zoneinfo import ZoneInfo
+import signal_log
+
+NY = ZoneInfo("America/New_York")
+EAT = ZoneInfo("Africa/Nairobi")
+
+# Fee per side, in %, by exchange (the account's VIP rates). Round trip = 2x.
+FEES = {"bybit": 0.0, "binanceusdm": 0.05}
+
+DEFAULTS = {
+    "exchange": "bybit", "symbol": "", "leverage": 10,
+    "batchUsd": 100.0,        # margin per trade in USDT (0 = use marginPct instead)
+    "marginPct": 10.0,
+    "takeProfitUsd": 1.0,     # net profit per batch after fees (0 = use targetR)
+    "stopLossUsd": 1.0,       # max loss per batch incl. fees (0 = stop at range middle)
+    "orbMinutes": 2, "bufferPct": 0.02, "targetR": 1.5, "maxTrades": 10, "exitAfterMin": 15,
+    "dailyLossPct": 3.0, "imbalanceMin": 55.0, "maxNotional": 5000.0,
+    "tickHz": 10, "maxOrdersPerSec": 20, "takerFeePct": -1.0, "slippagePct": 0.01,
+    "paperEquity": 700.0,
+}
+BOUNDS = {
+    "leverage": (1, 20), "marginPct": (1, 100), "batchUsd": (0, 1e6), "takeProfitUsd": (0, 1e4),
+    "stopLossUsd": (0, 1e4), "orbMinutes": (1, 15), "bufferPct": (0, 1),
+    "targetR": (0.5, 5), "maxTrades": (1, 10), "exitAfterMin": (5, 390), "dailyLossPct": (0.5, 20),
+    "imbalanceMin": (50, 90), "maxNotional": (10, 1e7), "tickHz": (5, 20), "maxOrdersPerSec": (1, 20),
+    "takerFeePct": (-1, 1), "slippagePct": (0, 1), "paperEquity": (10, 1e9),
+}
+
+
+def clean_config(cfg, base=None):
+    """Merge user input into the config, clamping every number to its bounds."""
+    out = dict(base or DEFAULTS)
+    for k, v in (cfg or {}).items():
+        if k not in DEFAULTS:
+            continue
+        if k in BOUNDS:
+            try:
+                v = float(v)
+            except (TypeError, ValueError):
+                continue
+            lo, hi = BOUNDS[k]
+            v = min(hi, max(lo, v))
+            if isinstance(DEFAULTS[k], int):
+                v = int(round(v))
+        else:
+            v = str(v).strip()
+        out[k] = v
+    return out
+
+
+def fee_pct(cfg):
+    """Fee per side. -1 means 'use this exchange's rate from FEES'."""
+    f = cfg.get("takerFeePct", -1)
+    return FEES.get(cfg.get("exchange"), 0.05) if f is None or f < 0 else f
+
+
+# ------------------------------------------------------------------ rate limit
+class RateLimiter:
+    """Sliding window: never more than `rate` acquisitions in any one second."""
+    def __init__(self, rate):
+        self.rate = int(rate)
+        self.times = []
+        self.lock = asyncio.Lock()
+
+    async def acquire(self):
+        async with self.lock:
+            while True:
+                now = time.monotonic()
+                self.times = [t for t in self.times if now - t < 1.0]
+                if len(self.times) < self.rate:
+                    self.times.append(now)
+                    return
+                await asyncio.sleep(1.0 - (now - self.times[0]) + 1e-4)
+
+
+# ------------------------------------------------------------------ strategy
+def open_time(day):
+    return dt.datetime.combine(day, dt.time(9, 30), tzinfo=NY)
+
+
+class OrbStrategy:
+    """Pure decision logic. Feed it ticks; it returns actions. No I/O."""
+
+    def __init__(self, cfg, equity):
+        self.cfg, self.start_equity = cfg, equity
+        self.day = None
+        self.reset_day(None)
+
+    def reset_day(self, day):
+        self.day, self.hi, self.lo = day, None, None
+        self.trades, self.realized, self.halted = 0, 0.0, None
+        self.pos = None            # {"side", "qty", "entry", "stop", "target", "openedAt"}
+        self.armed = {"long": True, "short": True}
+        self.after_win = None      # after a winning exit: {"side", "ext"} for continuation re-entry
+
+    def phase(self, now):
+        op = open_time(now.date())
+        if now < op:
+            return "before open"
+        if now < op + dt.timedelta(minutes=self.cfg["orbMinutes"]):
+            return "building range"
+        if now < op + dt.timedelta(minutes=self.cfg["exitAfterMin"]):
+            return "trading"
+        return "session over"
+
+    def unrealized(self, bid, ask):
+        p = self.pos
+        if not p:
+            return 0.0
+        px = bid if p["side"] == "long" else ask
+        return (px - p["entry"]) * p["qty"] * (1 if p["side"] == "long" else -1)
+
+    def on_tick(self, now, bid, ask, imbalance, ai=None):
+        """Return a list of actions: ("open", side, reason) or ("close", reason)."""
+        if now.date() != self.day:
+            self.reset_day(now.date())
+        mid = (bid + ask) / 2
+        ph = self.phase(now)
+        acts = []
+        if ph == "before open":
+            return acts
+        if ph == "building range":
+            self.hi = mid if self.hi is None else max(self.hi, mid)
+            self.lo = mid if self.lo is None else min(self.lo, mid)
+            return acts
+        if self.hi is None:            # started after the range window: no range, no trades
+            return acts
+        if self.pos:
+            p = self.pos
+            px = bid if p["side"] == "long" else ask
+            if ph == "session over":
+                acts.append(("close", "time exit"))
+            elif (ai or {}).get("action") == "exit":
+                acts.append(("close", "AI exit"))
+            elif (p["side"] == "long" and px <= p["stop"]) or (p["side"] == "short" and px >= p["stop"]):
+                acts.append(("close", "stop"))
+            elif (p["side"] == "long" and px >= p["target"]) or (p["side"] == "short" and px <= p["target"]):
+                acts.append(("close", "target"))
+            loss = self.realized + self.unrealized(bid, ask)
+            if not acts and loss <= -self.start_equity * self.cfg["dailyLossPct"] / 100:
+                acts.append(("close", "daily loss limit")); self.halted = "daily loss limit"
+            return acts
+        if self.realized <= -self.start_equity * self.cfg["dailyLossPct"] / 100:
+            self.halted = "daily loss limit"
+        if ph == "session over" or self.halted or self.trades >= self.cfg["maxTrades"]:
+            return acts
+        if self.lo < mid < self.hi:    # back inside the range: both sides re-arm
+            self.armed = {"long": True, "short": True}
+            self.after_win = None
+        w = self.after_win             # after a win, the same side re-arms on a fresh extreme
+        if w and not self.armed[w["side"]]:
+            if (w["side"] == "long" and mid > w["ext"]) or (w["side"] == "short" and mid < w["ext"]):
+                self.armed[w["side"]] = True
+        if (ai or {}).get("action") in ("stand_aside", "exit"):
+            return acts
+        buf = self.cfg["bufferPct"] / 100
+        if self.armed["long"] and mid > self.hi * (1 + buf) and imbalance >= self.cfg["imbalanceMin"]:
+            acts.append(("open", "long", f"broke range high {self.hi:.2f}, bids {imbalance:.0f}%"))
+        elif self.armed["short"] and mid < self.lo * (1 - buf) and imbalance <= 100 - self.cfg["imbalanceMin"]:
+            acts.append(("open", "short", f"broke range low {self.lo:.2f}, asks {100 - imbalance:.0f}%"))
+        return acts
+
+    def size(self, equity, price, ai=None):
+        margin = self.cfg["batchUsd"] if self.cfg.get("batchUsd") else equity * self.cfg["marginPct"] / 100
+        margin = min(margin, equity)
+        notional = min(margin * self.cfg["leverage"], self.cfg["maxNotional"])
+        scale = (ai or {}).get("size", 1.0) if (ai or {}).get("action") == "reduce" else 1.0
+        return notional * scale / price
+
+    def opened(self, side, qty, price, now):
+        sgn = 1 if side == "long" else -1
+        fees = 2 * price * qty * fee_pct(self.cfg) / 100      # round trip, in USDT
+        risk = (price - (self.hi + self.lo) / 2) if side == "long" else ((self.hi + self.lo) / 2 - price)
+        risk = max(risk, price * 0.001)                      # never a zero-width stop
+        if self.cfg.get("stopLossUsd"):                      # dollar stop: loss incl. fees <= stopLossUsd
+            risk = max((self.cfg["stopLossUsd"] - fees) / qty, price * 0.0002)
+        stop = price - sgn * risk
+        if self.cfg.get("takeProfitUsd"):                    # dollar target: net of fees
+            target = price + sgn * (self.cfg["takeProfitUsd"] + fees) / qty
+        else:
+            target = price + sgn * risk * self.cfg["targetR"]
+        self.pos = {"side": side, "qty": qty, "entry": price, "stop": stop,
+                    "target": target, "openedAt": now.isoformat()}
+        self.trades += 1
+        self.armed[side] = False
+
+    def closed(self, price, fee):
+        p = self.pos
+        pnl = (price - p["entry"]) * p["qty"] * (1 if p["side"] == "long" else -1) - fee
+        self.realized += pnl
+        self.pos = None
+        self.after_win = {"side": p["side"], "ext": price} if pnl > 0 else None
+        return pnl
+
+
+# ------------------------------------------------------------------ brokers
+class PaperBroker:
+    """Fills at the touch plus slippage; charges the taker fee on both legs."""
+    live = False
+
+    def __init__(self, cfg):
+        self.cfg, self.equity = cfg, cfg["paperEquity"]
+
+    async def setup(self, symbol):
+        return self.equity
+
+    async def market(self, side, qty, bid, ask, reduce_only=False):
+        slip = self.cfg["slippagePct"] / 100
+        px = ask * (1 + slip) if side == "buy" else bid * (1 - slip)
+        fee = px * qty * fee_pct(self.cfg) / 100
+        return {"price": px, "qty": qty, "fee": fee}
+
+    async def flatten(self):
+        return None
+
+    async def close(self):
+        return None
+
+
+class LiveBroker:
+    """Real orders through ccxt. Market orders; exits are reduce-only."""
+    live = True
+
+    def __init__(self, cfg, exchange):
+        self.cfg, self.ex, self.symbol = cfg, exchange, None
+
+    async def setup(self, symbol):
+        self.symbol = symbol
+        try:
+            await self.ex.set_margin_mode("isolated", symbol)
+        except Exception:
+            pass                                     # already isolated, or venue has no such call
+        await self.ex.set_leverage(int(self.cfg["leverage"]), symbol)
+        bal = await self.ex.fetch_balance()
+        usdt = (bal.get("USDT") or {})
+        return float(usdt.get("total") or usdt.get("free") or 0)
+
+    async def market(self, side, qty, bid, ask, reduce_only=False):
+        amount = float(self.ex.amount_to_precision(self.symbol, qty))
+        if amount <= 0:
+            raise ValueError("order size rounds to zero at this exchange's step size")
+        params = {"reduceOnly": True} if reduce_only else {}
+        o = await self.ex.create_order(self.symbol, "market", side, amount, None, params)
+        px = float(o.get("average") or o.get("price") or (ask if side == "buy" else bid))
+        fee = (o.get("fee") or {}).get("cost")
+        fee = float(fee) if fee is not None else px * amount * fee_pct(self.cfg) / 100
+        return {"price": px, "qty": float(o.get("filled") or amount), "fee": fee, "id": o.get("id")}
+
+    async def flatten(self):
+        """Kill switch: cancel resting orders and close any open position."""
+        try:
+            await self.ex.cancel_all_orders(self.symbol)
+        except Exception:
+            pass
+        for p in await self.ex.fetch_positions([self.symbol]):
+            qty = abs(float(p.get("contracts") or 0))
+            if qty:
+                side = "sell" if p.get("side") == "long" else "buy"
+                await self.ex.create_order(self.symbol, "market", side, qty, None, {"reduceOnly": True})
+
+    async def close(self):
+        try:
+            await self.ex.close()
+        except Exception:
+            pass
+
+
+# ------------------------------------------------------------------ keys
+class KeyStore:
+    """API keys live in memory only. They are never written to disk, logged,
+    or sent back to the browser (only a masked form is)."""
+
+    def __init__(self):
+        self.creds = None
+        ex, k, s = os.getenv("EXCHANGE_ID"), os.getenv("EXCHANGE_API_KEY"), os.getenv("EXCHANGE_API_SECRET")
+        if ex and k and s:
+            self.creds = {"exchange": ex, "apiKey": k, "secret": s, "password": os.getenv("EXCHANGE_API_PASSWORD", "")}
+        self.validated = None
+
+    def set(self, exchange, api_key, secret, password=""):
+        self.creds = {"exchange": exchange.strip(), "apiKey": api_key.strip(), "secret": secret.strip(),
+                      "password": (password or "").strip()}
+        self.validated = None
+
+    def clear(self):
+        self.creds, self.validated = None, None
+
+    def masked(self):
+        if not self.creds:
+            return None
+        k = self.creds["apiKey"]
+        return {"exchange": self.creds["exchange"], "apiKey": (k[:4] + "…" + k[-4:]) if len(k) > 8 else "…",
+                "validated": self.validated}
+
+
+def make_exchange(exchange_id, creds=None, pro=True):
+    """A ccxt exchange object: WebSocket-capable (ccxt.pro) when available."""
+    import ccxt.pro as ccxtpro
+    import ccxt.async_support as ccxta
+    mod = ccxtpro if pro and hasattr(ccxtpro, exchange_id) else ccxta
+    if not hasattr(mod, exchange_id):
+        raise ValueError(f"unknown exchange '{exchange_id}'")
+    opts = {"enableRateLimit": True, "options": {"defaultType": "swap"}}
+    if exchange_id == "bybit":
+        opts["options"]["fetchMarkets"] = {"types": ["linear"]}     # perps only: faster start
+    if creds:
+        opts.update({"apiKey": creds["apiKey"], "secret": creds["secret"]})
+        if creds.get("password"):
+            opts["password"] = creds["password"]
+    return getattr(mod, exchange_id)(opts)
+
+
+def find_symbol(markets, wanted=""):
+    """The PLTR USDT perpetual. This desk trades PLTR only: any other symbol is refused."""
+    if wanted:
+        m = markets.get(wanted) or {}
+        return wanted if (m.get("base") or "").upper() in ("PLTR", "PLTRX") and m.get("swap") else None
+    for sym, m in markets.items():
+        if m.get("swap") and m.get("quote") == "USDT" and (m.get("base") or "").upper() in ("PLTR", "PLTRX"):
+            return sym
+    return None
+
+
+# ------------------------------------------------------------------ agent
+class TradeAgent:
+    """Runs the ORB strategy on a live order-book stream, in paper or live mode."""
+
+    def __init__(self, get_ai=None, exchange_factory=make_exchange):
+        self.cfg = dict(DEFAULTS)
+        self.keys = KeyStore()
+        self.get_ai = get_ai or (lambda: None)
+        self.exchange_factory = exchange_factory
+        self.mode, self.live_armed_day = "off", None
+        self.task, self.feed_ex, self.broker, self.strategy = None, None, None, None
+        self.symbol, self.equity = None, None
+        self.book = None                    # latest {"bid", "ask", "imb", "ts"}
+        self.limiter = RateLimiter(self.cfg["maxOrdersPerSec"])
+        self.events, self.trades = [], []
+        self.stats = {"checksPerSec": 0.0, "ordersLastSec": 0, "bookUpdatesPerSec": 0.0}
+        self._order_times, self._busy = [], False
+        self.error = None
+
+    # ---------------------------------------------------------- control
+    def status(self):
+        s = self.strategy
+        now = dt.datetime.now(NY)
+        return {
+            "mode": self.mode, "liveArmed": self.live_armed_day == now.date(), "config": self.cfg,
+            "feePct": fee_pct(self.cfg),
+            "keys": self.keys.masked(), "symbol": self.symbol, "equity": self.equity, "error": self.error,
+            "phase": s.phase(now) if s else "stopped",
+            "openEAT": open_time(now.date()).astimezone(EAT).strftime("%H:%M"),
+            "range": {"high": s.hi, "low": s.lo} if s else None,
+            "position": s.pos if s else None, "tradesToday": s.trades if s else 0,
+            "realized": round(s.realized, 4) if s else 0.0,
+            "unrealized": round(s.unrealized(self.book["bid"], self.book["ask"]), 4) if (s and self.book) else 0.0,
+            "halted": s.halted if s else None, "book": self.book, "stats": self.stats,
+            "events": self.events[-30:], "trades": self.trades[-20:],
+        }
+
+    def configure(self, cfg):
+        if self.mode != "off":
+            raise RuntimeError("stop the agent before changing settings")
+        self.cfg = clean_config(cfg, self.cfg)
+        self.limiter = RateLimiter(self.cfg["maxOrdersPerSec"])
+        return self.cfg
+
+    async def validate_keys(self):
+        """Log in and read the balance. Proves the keys work without trading."""
+        if not self.keys.creds:
+            raise RuntimeError("no API keys set")
+        ex = self.exchange_factory(self.keys.creds["exchange"], self.keys.creds, pro=False)
+        try:
+            bal = await ex.fetch_balance()
+            usdt = bal.get("USDT") or {}
+            self.keys.validated = {"ok": True, "usdt": usdt.get("total"), "at": _iso()}
+        except Exception as e:
+            self.keys.validated = {"ok": False, "error": f"{type(e).__name__}: {str(e)[:120]}", "at": _iso()}
+        finally:
+            try:
+                await ex.close()
+            except Exception:
+                pass
+        return self.keys.validated
+
+    async def start(self, mode, confirm=""):
+        if self.mode != "off":
+            raise RuntimeError(f"already running in {self.mode} mode")
+        if mode not in ("paper", "live"):
+            raise ValueError("mode must be paper or live")
+        exchange_id = self.cfg["exchange"]
+        if mode == "live":
+            if confirm != "LIVE":
+                raise PermissionError("type LIVE to confirm real-money trading")
+            if not self.keys.creds or not (self.keys.validated or {}).get("ok"):
+                raise PermissionError("set and validate API keys first")
+            exchange_id = self.keys.creds["exchange"]
+            self.cfg["exchange"] = exchange_id          # fees follow the exchange actually traded
+        self.error = None
+        try:
+            self.feed_ex = self.exchange_factory(exchange_id, None, pro=True)
+            await self.feed_ex.load_markets()
+            self.symbol = find_symbol(self.feed_ex.markets, self.cfg["symbol"])
+            if not self.symbol:
+                raise RuntimeError(f"no PLTR USDT perpetual found on {exchange_id}")
+            if mode == "live":
+                ex = self.exchange_factory(exchange_id, self.keys.creds, pro=False)
+                self.broker = LiveBroker(self.cfg, ex)
+                await ex.load_markets()
+            else:
+                self.broker = PaperBroker(self.cfg)
+            self.equity = await self.broker.setup(self.symbol)
+        except Exception as e:
+            for x in (self.broker, self.feed_ex):
+                if x is not None:
+                    try:
+                        await x.close()
+                    except Exception:
+                        pass
+            self.broker = self.feed_ex = None
+            msg = str(e) if isinstance(e, RuntimeError) else f"could not reach {exchange_id} ({type(e).__name__}): {str(e)[:140]}"
+            raise RuntimeError(msg) from None
+        if mode == "live":
+            self.live_armed_day = dt.datetime.now(NY).date()
+        self.strategy = OrbStrategy(self.cfg, self.equity)
+        self.mode = mode
+        self._event(f"started {mode} on {exchange_id} {self.symbol}, equity {self.equity:.2f} USDT, "
+                    f"{self.cfg['leverage']}x")
+        self.task = asyncio.create_task(self._run())
+        return self.status()
+
+    async def stop(self, reason="stopped by user"):
+        """Kill switch: flatten, cancel, shut the stream."""
+        if self.task:
+            self.task.cancel()
+            self.task = None
+        try:
+            if self.strategy and self.strategy.pos and self.book:
+                await self._close(reason)
+            if self.broker:
+                await self.broker.flatten()
+        except Exception as e:
+            self.error = f"flatten failed: {e}. CHECK THE EXCHANGE MANUALLY."
+        for x in (self.broker, self.feed_ex):
+            if x is not None:
+                try:
+                    await x.close()
+                except Exception:
+                    pass
+        self._event(f"{self.mode} stopped: {reason}")
+        self.mode, self.live_armed_day, self.feed_ex = "off", None, None
+        return self.status()
+
+    # ---------------------------------------------------------- loop
+    async def _run(self):
+        """Book stream + timer. Evaluates on every update, at most tickHz/s, at least 5/s."""
+        hz = self.cfg["tickHz"]
+        min_gap, max_gap = 1.0 / hz, 1.0 / 5
+        last_eval, checks, updates, win_start = 0.0, 0, 0, time.monotonic()
+        stream = asyncio.create_task(self._stream())
+        try:
+            while True:
+                if stream.done() and stream.exception():
+                    self.error = f"market stream: {stream.exception()}"
+                    stream = asyncio.create_task(self._stream())
+                now_m = time.monotonic()
+                gap = now_m - last_eval
+                fresh = self.book is not None and self.book.get("_new")
+                if self.book and gap >= min_gap and (fresh or gap >= max_gap):
+                    if fresh:
+                        updates += 1
+                    self.book["_new"] = False
+                    last_eval = now_m
+                    checks += 1
+                    await self._evaluate()
+                if now_m - win_start >= 1.0:
+                    el = now_m - win_start
+                    self.stats["checksPerSec"] = round(checks / el, 1)
+                    self.stats["bookUpdatesPerSec"] = round(updates / el, 1)
+                    checks = updates = 0; win_start = now_m
+                    self._roll_day()
+                await asyncio.sleep(min_gap / 4)
+        finally:
+            stream.cancel()
+
+    async def _stream(self):
+        ex, sym = self.feed_ex, self.symbol
+        ws = hasattr(ex, "watch_order_book")
+        while True:
+            try:
+                ob = await (ex.watch_order_book(sym, 20) if ws else ex.fetch_order_book(sym, 20))
+            except Exception as e:
+                if ws:                       # WebSocket unavailable: fall back to REST polling
+                    ws, self.error = False, f"websocket down ({type(e).__name__}), polling REST"
+                    continue
+                raise
+            bids, asks = ob.get("bids") or [], ob.get("asks") or []
+            if bids and asks:
+                bv = sum(b[1] for b in bids[:10]); av = sum(a[1] for a in asks[:10])
+                self.book = {"bid": bids[0][0], "ask": asks[0][0], "imb": 100 * bv / (bv + av) if bv + av else 50.0,
+                             "ts": ob.get("timestamp") or int(time.time() * 1000), "_new": True}
+            if not ws:
+                await asyncio.sleep(1.0 / self.cfg["tickHz"])
+
+    def _roll_day(self):
+        """Live trading is armed for one session only: after it, drop back to paper."""
+        today = dt.datetime.now(NY).date()
+        if self.mode == "live" and self.live_armed_day and today != self.live_armed_day \
+                and not (self.strategy and self.strategy.pos):
+            self._event("live session over: disarmed, switching to stop (re-arm tomorrow)")
+            asyncio.create_task(self.stop("live disarmed after its session"))
+
+    async def _evaluate(self, now=None):
+        if self._busy:
+            return
+        b, s = self.book, self.strategy
+        now = now or dt.datetime.now(NY)
+        ai = self.get_ai()
+        self._busy = True
+        try:
+            for act in s.on_tick(now, b["bid"], b["ask"], b["imb"], ai):
+                if act[0] == "open":
+                    await self._open(act[1], act[2], now, ai)
+                else:
+                    await self._close(act[1])
+        except Exception as e:
+            self.error = f"{type(e).__name__}: {str(e)[:160]}"
+            self._event("order error: " + self.error)
+        finally:
+            self._busy = False
+
+    async def _order(self, side, qty, reduce_only):
+        await self.limiter.acquire()
+        t = time.monotonic()
+        self._order_times = [x for x in self._order_times if t - x < 1.0] + [t]
+        self.stats["ordersLastSec"] = len(self._order_times)
+        return await self.broker.market(side, qty, self.book["bid"], self.book["ask"], reduce_only)
+
+    async def _open(self, side, reason, now, ai):
+        s = self.strategy
+        eq = self.equity + s.realized
+        qty = s.size(eq, self.book["ask"] if side == "long" else self.book["bid"], ai)
+        if qty <= 0:
+            return
+        fill = await self._order("buy" if side == "long" else "sell", qty, False)
+        s.opened(side, fill["qty"], fill["price"], now)
+        s.pos["entryFee"] = fill["fee"]
+        self._event(f"OPEN {side} {fill['qty']:.4f} @ {fill['price']:.2f} ({reason}); "
+                    f"stop {s.pos['stop']:.3f}, target {s.pos['target']:.3f}")
+
+    async def _close(self, reason):
+        s = self.strategy
+        p = dict(s.pos)
+        fill = await self._order("sell" if p["side"] == "long" else "buy", p["qty"], True)
+        pnl = s.closed(fill["price"], fill["fee"] + p.get("entryFee", 0.0))
+        row = {"mode": self.mode, "day": str(s.day), "side": p["side"], "qty": round(p["qty"], 6),
+               "entry": p["entry"], "exit": fill["price"], "pnl": round(pnl, 4), "why": reason,
+               "leverage": self.cfg["leverage"], "at": _iso()}
+        self.trades.append(row)
+        signal_log.log_outcome({"kind": "orb_trade", **row})
+        self._event(f"CLOSE {p['side']} @ {fill['price']:.2f} ({reason}) pnl {pnl:+.2f} USDT")
+
+    def _event(self, msg):
+        self.events.append({"at": _iso(), "msg": msg})
+        self.events = self.events[-200:]
+
+
+def _iso():
+    return dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
