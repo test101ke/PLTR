@@ -29,8 +29,9 @@ what count. (The old version picked the best TEST score out of 12 rules, which
 quietly fits to the test set.) "passed" requires test hit >= 70%, Wilson 95%
 floor > 50%, n_test >= 20 and positive net expectancy.
 
-DATA. 1-minute candles from a PLTR perpetual, first venue that answers:
-Bybit linear, Binance USD-M, KuCoin, then Bybit spot. Pin with BT_VENUE/BT_SYMBOL.
+DATA. 1-minute candles from a PLTR perpetual, first venue that answers (see
+VENUES: Bybit, Binance, Bitget, OKX, Gate, MEXC, KuCoin, Bybit spot). Pin with
+BT_VENUE/BT_SYMBOL. Which venues answer depends on where this runs.
 
 Run:  python backtest.py            (writes static/backtest.json)
 Env:  BT_DAYS=200 BT_SIGNAL_MIN=2 BT_WINDOW_MIN=15 BT_FEE_PCT=0.10
@@ -159,6 +160,7 @@ async def kucoin_disc(client):
 
 
 async def kucoin_kl(client, sym, start, end):
+    # KuCoin futures takes from/to in MILLISECONDS (the old code sent seconds and got nothing)
     j = await _get(client, f"https://api-futures.kucoin.com/api/v1/kline/query?symbol={sym}"
                            f"&granularity=1&from={start}&to={end}")
     if not j or not j.get("data"):
@@ -166,9 +168,69 @@ async def kucoin_kl(client, sym, start, end):
     return [[int(r[0]), float(r[1]), float(r[2]), float(r[3]), float(r[4]), float(r[5])] for r in j["data"]]
 
 
+async def gate_disc(client):
+    j = await _get(client, "https://api.gateio.ws/api/v4/futures/usdt/contracts")
+    return _pick([c["name"] for c in j if "PLTR" in c.get("name", "").upper()]) if isinstance(j, list) else None
+
+
+async def gate_kl(client, sym, start, end):
+    j = await _get(client, f"https://api.gateio.ws/api/v4/futures/usdt/candlesticks?contract={sym}"
+                           f"&interval=1m&from={start // 1000}&to={end // 1000}")
+    if not isinstance(j, list):
+        return []
+    return [[int(r["t"]) * 1000, float(r["o"]), float(r["h"]), float(r["l"]), float(r["c"]), float(r.get("v") or 0)]
+            for r in j]
+
+
+async def bitget_disc(client):
+    j = await _get(client, "https://api.bitget.com/api/v2/mix/market/contracts?productType=usdt-futures")
+    return _pick([c["symbol"] for c in (j or {}).get("data") or [] if "PLTR" in c["symbol"].upper()])
+
+
+async def bitget_kl(client, sym, start, end):
+    j = await _get(client, f"https://api.bitget.com/api/v2/mix/market/history-candles?symbol={sym}"
+                           f"&productType=usdt-futures&granularity=1m&startTime={start}&endTime={end}&limit=200")
+    return [[int(r[0]), float(r[1]), float(r[2]), float(r[3]), float(r[4]), float(r[5])]
+            for r in (j or {}).get("data") or []]
+
+
+async def mexc_disc(client):
+    j = await _get(client, "https://contract.mexc.com/api/v1/contract/detail")
+    return _pick([c["symbol"] for c in (j or {}).get("data") or [] if "PLTR" in c["symbol"].upper()])
+
+
+async def mexc_kl(client, sym, start, end):
+    j = await _get(client, f"https://contract.mexc.com/api/v1/contract/kline/{sym}?interval=Min1"
+                           f"&start={start // 1000}&end={end // 1000}")
+    d = (j or {}).get("data") or {}
+    t = d.get("time") or []
+    return [[int(t[i]) * 1000, float(d["open"][i]), float(d["high"][i]), float(d["low"][i]),
+             float(d["close"][i]), float((d.get("vol") or [0] * len(t))[i])] for i in range(len(t))]
+
+
+async def okx_disc(client):
+    j = await _get(client, "https://www.okx.com/api/v5/public/instruments?instType=SWAP")
+    return _pick([c["instId"] for c in (j or {}).get("data") or []
+                  if "PLTR" in c["instId"].upper() and c["instId"].upper().endswith("USDT-SWAP")])
+
+
+async def okx_kl(client, sym, start, end):
+    j = await _get(client, f"https://www.okx.com/api/v5/market/history-candles?instId={sym}&bar=1m"
+                           f"&after={end + 1}&before={start - 1}&limit=100")
+    return [[int(r[0]), float(r[1]), float(r[2]), float(r[3]), float(r[4]), float(r[5])]
+            for r in (j or {}).get("data") or []]
+
+
+# Tried in order; the first that lists PLTR AND returns candles is used. All fetchers
+# take and return milliseconds. Bybit and Binance refuse US IPs (e.g. GitHub Actions),
+# so the others matter there.
 VENUES = [
     ("bybit-perp",   lambda c: bybit_disc(c, "linear"), lambda c, s, a, b: bybit_kl(c, "linear", s, a, b)),
     ("binance-perp", binance_disc,                      binance_kl),
+    ("bitget-perp",  bitget_disc,                       bitget_kl),
+    ("okx-swap",     okx_disc,                          okx_kl),
+    ("gate-perp",    gate_disc,                         gate_kl),
+    ("mexc-perp",    mexc_disc,                         mexc_kl),
     ("kucoin-perp",  kucoin_disc,                       kucoin_kl),
     ("bybit-spot",   lambda c: bybit_disc(c, "spot"),   lambda c, s, a, b: bybit_kl(c, "spot", s, a, b)),
 ]
@@ -188,22 +250,31 @@ async def resolve_source(client):
         try:
             sym = forced_s or await disc(client)
             if not sym:
+                _diag(f"{name}: no PLTR contract listed (or venue unreachable)")
                 continue
             fetch = _fetcher(client, name, sym, klfn)
-            if await fetch(op - dt.timedelta(minutes=2), op + dt.timedelta(minutes=10)):
+            rows = await fetch(op - dt.timedelta(minutes=2), op + dt.timedelta(minutes=10))
+            if rows:
+                _diag(f"{name}: {sym} OK, {len(rows)} candles at the last open - using it")
                 return name, sym, fetch
-        except Exception:
+            _diag(f"{name}: {sym} listed but no 1-minute candles returned")
+        except Exception as e:
+            _diag(f"{name}: error {type(e).__name__}: {str(e)[:100]}")
             continue
     return None, None, None
 
 
+def _diag(msg):
+    import sys
+    print("[source] " + msg, file=sys.stderr, flush=True)
+
+
 def _fetcher(client, venue, sym, klfn):
-    """fetch(start_dt, end_dt) -> {minute_ms: row}. KuCoin takes seconds, others ms."""
-    secs = "kucoin" in venue
+    """fetch(start_dt, end_dt) -> {minute_ms: row}. Every venue fetcher takes milliseconds."""
 
     async def fetch(a, b):
         a_ms, b_ms = int(a.timestamp() * 1000), int(b.timestamp() * 1000)
-        rows = await klfn(client, sym, a_ms // 1000 if secs else a_ms, b_ms // 1000 if secs else b_ms)
+        rows = await klfn(client, sym, a_ms, b_ms)
         out = {}
         for r in rows or []:
             t = r[0] if r[0] > 1e12 else r[0] * 1000
@@ -506,7 +577,8 @@ async def run_backtest(days=200):
     async with httpx.AsyncClient(follow_redirects=True) as client:
         venue, symbol, fetch = await resolve_source(client)
         if not symbol:
-            return {"error": "no PLTR perp/spot contract reachable on Bybit, Binance or KuCoin", "generatedAt": now}
+            return {"error": "no PLTR contract with 1-minute history reachable on "
+                             + ", ".join(v[0] for v in VENUES), "generatedAt": now}
         raw = await load_days(fetch, trading_days(days))
     samples = build_samples(raw, open_news_log())
     out = analyse(samples, {"source": f"{venue}:{symbol}", "venue": venue, "symbol": symbol})
