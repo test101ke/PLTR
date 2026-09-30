@@ -1457,6 +1457,46 @@ async def trade_stop(request: Request):
     return _json(await trader_for(name).stop("kill switch"))
 
 
+_SESSION_BT = {"running": False, "result": None, "text": "", "started": None, "by": None, "error": None}
+
+
+@app.post("/api/trade/session-backtest")
+async def session_backtest_start(request: Request):
+    """Replay today's session (16:30 EAT to now) second by second on Binance or Bybit
+    trades, optionally with the settings search. Runs on this server, which (on
+    Render in Frankfurt) can reach both exchanges; GitHub's servers cannot."""
+    name = signed_in(request)
+    if _SESSION_BT["running"]:
+        raise HTTPException(409, "a backtest is already running")
+    b = await _body(request)
+    venue = b.get("venue") if b.get("venue") in ("binance", "bybit", "bitget", "okx", "gate") else None
+    mode = "all" if b.get("optimize") else "today"
+    trials = max(20, min(int(b.get("trials") or 150), 400))
+    _SESSION_BT.update(running=True, started=now_iso(), by=name, error=None)
+
+    def work():
+        import session_backtest as sbt
+        return sbt.main(mode, venue, trials)
+
+    async def run():
+        try:
+            import session_backtest as sbt
+            res = await asyncio.to_thread(work)
+            _SESSION_BT.update(result=res, text=sbt.text(res))
+        except Exception as e:
+            _SESSION_BT["error"] = f"{type(e).__name__}: {e}"
+        finally:
+            _SESSION_BT["running"] = False
+    asyncio.create_task(run())
+    return {"started": True, "mode": mode, "venue": venue or "binance first"}
+
+
+@app.get("/api/trade/session-backtest")
+async def session_backtest_status(request: Request):
+    signed_in(request)
+    return _json({k: v for k, v in _SESSION_BT.items() if k != "result"})
+
+
 @app.get("/trade")
 async def trade_page():
     return FileResponse(os.path.join(HERE, "static", "trade.html"))

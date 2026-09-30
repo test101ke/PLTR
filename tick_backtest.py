@@ -18,9 +18,11 @@ Per day:
          (the closest historical stand-in for the live order-book lean);
        - flow filter OFF.
 
-Sources, first that answers with trades: Bitget, OKX, Gate.io. Each keeps
-roughly the last few months of trades, so the history is shorter than the
-1-minute study; the log says exactly which days were covered.
+Sources, first that answers with trades (TICK_VENUE=binance|bybit|bitget... pins one):
+Binance futures aggTrades API, Binance daily files (data.binance.vision), Bybit
+daily files (public.bybit.com), Bitget, OKX, Gate.io. The Binance and Bybit APIs
+refuse US IPs (GitHub Actions); run from Render (Frankfurt) or your own machine
+to use them. The log says exactly which source and days were used.
 
 Run:  python tick_backtest.py      (writes static/tick_backtest.json)
 Env:  TICK_DAYS=60  TICK_VENUE=bitget|okx|gate
@@ -121,11 +123,121 @@ async def gate_trades(client, sym, start, end):
     return out
 
 
+# ---- Binance USD-M futures: aggregated trades API (any past hour, 1000 per page)
+async def binance_trades(client, sym, start, end):
+    out, frm = [], None
+    for a in range(start, end, 3_600_000):                   # the API wants <1h per window
+        b = min(end, a + 3_600_000) - 1
+        frm = None
+        for _ in range(500):
+            q = f"fromId={frm}" if frm is not None else f"startTime={a}&endTime={b}"
+            j = await _get(client, f"https://fapi.binance.com/fapi/v1/aggTrades?symbol={sym}&{q}&limit=1000")
+            if not isinstance(j, list) or not j:
+                break
+            for r in j:
+                t = int(r["T"])
+                if start <= t < end:
+                    # m = buyer is the maker, i.e. the taker SOLD
+                    out.append((t, float(r["p"]), float(r["q"]), -1 if r["m"] else 1))
+            if len(j) < 1000 or int(j[-1]["T"]) > b:
+                break
+            frm = int(j[-1]["a"]) + 1
+            await asyncio.sleep(0.05)
+    return out
+
+
+def _parse_binance_csv(text, start, end):
+    """data.binance.vision aggTrades CSV: id,price,qty,first,last,time_ms,is_buyer_maker."""
+    out = []
+    for line in text.splitlines():
+        f = line.split(",")
+        if len(f) < 7 or not f[0].strip().isdigit():
+            continue                                         # header
+        t = int(f[5])
+        t = t // 1000 if t > 10**14 else t                   # some newer files are in microseconds
+        if start <= t < end:
+            out.append((t, float(f[1]), float(f[2]), -1 if f[6].strip().lower() == "true" else 1))
+    return out
+
+
+_DAY_CACHE = {}
+
+
+async def _daily_file(client, url):
+    if url not in _DAY_CACHE:
+        try:
+            r = await client.get(url, headers=bt.UA, timeout=60)
+            _DAY_CACHE[url] = r.content if r.status_code == 200 else None
+        except Exception:
+            _DAY_CACHE[url] = None
+    return _DAY_CACHE[url]
+
+
+async def binance_vision_trades(client, sym, start, end):
+    """Binance's public daily trade files (data.binance.vision), published the next day."""
+    import io, zipfile
+    day = dt.datetime.fromtimestamp(start / 1000, dt.timezone.utc).date()
+    blob = await _daily_file(client, f"https://data.binance.vision/data/futures/um/daily/aggTrades/{sym}/"
+                                     f"{sym}-aggTrades-{day}.zip")
+    if not blob:
+        return []
+    with zipfile.ZipFile(io.BytesIO(blob)) as z:
+        text = z.read(z.namelist()[0]).decode()
+    return _parse_binance_csv(text, start, end)
+
+
+def _parse_bybit_csv(text, start, end):
+    """public.bybit.com trading CSV: timestamp(s),symbol,side,size,price,..."""
+    out = []
+    for line in text.splitlines():
+        f = line.split(",")
+        if len(f) < 5 or f[0].startswith("timestamp"):
+            continue
+        t = int(float(f[0]) * 1000)
+        if start <= t < end:
+            out.append((t, float(f[4]), float(f[3]), 1 if f[2] == "Buy" else -1))
+    return out
+
+
+async def bybit_public_trades(client, sym, start, end):
+    """Bybit's public daily trade files (public.bybit.com), published the next day."""
+    import gzip
+    day = dt.datetime.fromtimestamp(start / 1000, dt.timezone.utc).date()
+    blob = await _daily_file(client, f"https://public.bybit.com/trading/{sym}/{sym}{day}.csv.gz")
+    if not blob:
+        return []
+    return _parse_bybit_csv(gzip.decompress(blob).decode(), start, end)
+
+
+async def bybit_recent_trades(client, sym, start, end):
+    """Bybit's live API only returns the latest 1000 trades: enough for the last
+    minutes, not a whole session. Used for today when nothing better answers."""
+    j = await _get(client, f"https://api.bybit.com/v5/market/recent-trade?category=linear&symbol={sym}&limit=1000")
+    rows = ((j or {}).get("result") or {}).get("list") or []
+    return [(int(r["time"]), float(r["price"]), float(r["size"]), 1 if r["side"] == "Buy" else -1)
+            for r in rows if start <= int(r["time"]) < end]
+
+
+async def _sym(fn, client, fallback="PLTRUSDT"):
+    """Symbol from the venue's API; the public file servers use the same name."""
+    try:
+        return await fn(client) or fallback
+    except Exception:
+        return fallback
+
+
+# Order matters: the first source that returns trades is used. Binance first
+# (deepest PLTR perp), then Bybit (where the account trades), then the rest.
+# Bybit and Binance APIs refuse US IPs (GitHub); their daily files may not.
 SOURCES = [
-    ("bitget", bt.bitget_disc, bitget_trades),
-    ("okx", bt.okx_disc, okx_trades),
-    ("gate", bt.gate_disc, gate_trades),
+    ("binance",        bt.binance_disc,                                       binance_trades),
+    ("binance-vision", lambda c: _sym(bt.binance_disc, c),                    binance_vision_trades),
+    ("bybit-public",   lambda c: _sym(lambda cc: bt.bybit_disc(cc, "linear"), c), bybit_public_trades),
+    ("bitget",         bt.bitget_disc,                                        bitget_trades),
+    ("okx",            bt.okx_disc,                                           okx_trades),
+    ("gate",           bt.gate_disc,                                          gate_trades),
 ]
+TODAY_EXTRA = [("bybit-recent", lambda c: bt.bybit_disc(c, "linear"), bybit_recent_trades)]
 
 
 # ------------------------------------------------------------------ 1-second bars
@@ -158,11 +270,11 @@ def to_bars(trades, start_ms, end_ms):
 
 
 # ------------------------------------------------------------------ run
-async def collect(days):
-    forced = os.getenv("TICK_VENUE", "").strip()
+async def collect(days, venue=None):
+    forced = venue or os.getenv("TICK_VENUE", "").strip()
     async with httpx.AsyncClient(follow_redirects=True) as client:
         for name, disc, fetch in SOURCES:
-            if forced and forced != name:
+            if forced and not name.startswith(forced):
                 continue
             sym = await disc(client)
             if not sym:

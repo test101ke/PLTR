@@ -547,6 +547,17 @@ a.navlink{font-size:13px;font-weight:600;color:var(--accent);text-decoration:non
     </section>
 
     <section class="card">
+      <div class="sect-title"><h2>Backtest today's session</h2><span class="msg" id="sbState"></span></div>
+      <p class="msg" style="margin:0 0 8px">Replays the model second by second on real trades from the 16:30 EAT open to now. Runs on this server, which can reach Bybit and Binance.</p>
+      <div class="row">
+        <label style="flex-direction:row;align-items:center;gap:6px">Data<select id="sbVenue"><option value="binance">Binance (most volume)</option><option value="bybit">Bybit</option><option value="">Best available</option></select></label>
+        <label style="flex-direction:row;align-items:center;gap:6px"><input type="checkbox" id="sbOpt"> also optimise settings (a few minutes)</label>
+        <button class="b pri" type="button" id="sbRun">Run backtest</button>
+      </div>
+      <pre class="ev" id="sbOut" style="margin-top:10px;white-space:pre-wrap;max-height:420px" hidden></pre>
+    </section>
+
+    <section class="card">
       <div class="sect-title"><h2>Now</h2></div>
       <div class="tiles" id="tpTiles"></div>
       <details class="adv" style="margin-top:10px"><summary>Activity log</summary><div class="ev" id="tpEvents" style="margin-top:6px">No activity yet.</div></details>
@@ -696,6 +707,19 @@ $("#tpSaveKeys").onclick=act(async()=>{$("#tpKeyMsg").textContent="testing…";
 $("#tpClearKeys").onclick=act(async()=>{const r=await tapi("keys","DELETE",{});renderKeys(r.keys);},"#setErr");
 
 
+/* ---------- today's session backtest (runs on the server) ---------- */
+async function sbPoll(){
+  try{const s=await jfetch("/api/trade/session-backtest");
+    $("#sbRun").disabled=s.running;
+    $("#sbState").textContent=s.running?`running since ${s.started.slice(11,19)} UTC…`:(s.error?"failed":(s.text?"done":""));
+    if(s.error){$("#sbOut").hidden=false;$("#sbOut").textContent=s.error;}
+    else if(s.text){$("#sbOut").hidden=false;$("#sbOut").textContent=s.text;}
+    if(s.running)setTimeout(sbPoll,4000);
+  }catch(e){}
+}
+$("#sbRun").onclick=async()=>{try{await jfetch("/api/trade/session-backtest","POST",{venue:$("#sbVenue").value,optimize:$("#sbOpt").checked});
+  $("#sbOut").hidden=false;$("#sbOut").textContent="Downloading trades and replaying…";sbPoll();}catch(e){$("#sbState").textContent=e.message;}};
+sbPoll();
 if(location.hash==="#settings")$("#setBtn").click();
 tpPull();setInterval(tpPull,1000);
 </script>

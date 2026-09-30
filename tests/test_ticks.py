@@ -84,6 +84,48 @@ def test_flow_filter_only_trades_with_the_buyers():
     assert sell == [], "a breakout against the taker flow must be skipped"
 
 
+def test_binance_api_trades_taker_side_and_paging():
+    page = [{"a": 10, "p": "30.1", "q": "2", "T": A + 100, "m": False},     # buyer is taker
+            {"a": 11, "p": "30.0", "q": "5", "T": A + 900, "m": True}]      # buyer is maker: taker sold
+    c = Client(page)
+    t = asyncio.run(tb.binance_trades(c, "PLTRUSDT", A, A + 1000))
+    assert t == [(A + 100, 30.1, 2.0, 1), (A + 900, 30.0, 5.0, -1)], t
+    assert f"startTime={A}" in c.urls[0] and "fapi/v1/aggTrades" in c.urls[0]
+
+
+def test_binance_vision_and_bybit_daily_files_parse():
+    csv_b = "agg_trade_id,price,quantity,first_trade_id,last_trade_id,transact_time,is_buyer_maker\n" \
+            f"1,30.5,3,1,1,{A + 200},true\n2,30.6,1,2,2,{(A + 400) * 1000},false\n"
+    assert tb._parse_binance_csv(csv_b, A, A + 1000) == [(A + 200, 30.5, 3.0, -1), (A + 400, 30.6, 1.0, 1)]
+    csv_y = "timestamp,symbol,side,size,price,tickDirection,trdMatchID\n" \
+            f"{(A + 300) / 1000:.4f},PLTRUSDT,Buy,4,30.7,PlusTick,x\n{(A + 5000) / 1000},PLTRUSDT,Sell,1,30.8,ZeroMinusTick,y\n"
+    assert tb._parse_bybit_csv(csv_y, A, A + 1000) == [(A + 300, 30.7, 4.0, 1)]
+
+
+def test_sources_prefer_binance_then_bybit():
+    names = [s[0] for s in tb.SOURCES]
+    assert names[:3] == ["binance", "binance-vision", "bybit-public"], names
+
+
+def test_session_optimizer_ranks_on_train_and_scores_unseen():
+    import random, session_backtest as sb
+    rnd, raw = random.Random(2), []
+    for day in bt.trading_days(12):
+        op = int(dt.datetime.combine(day, dt.time(9, 30), tzinfo=bt.NY).timestamp() * 1000)
+        px, trades = 100.0, []
+        for s in range(900):
+            px *= 1 + rnd.gauss(0, 0.0004)
+            trades.append((op + s * 1000, px, 1.0, rnd.choice([1, -1])))
+        raw.append((day, tb.to_bars(trades, op, op + 960_000), None))
+    r = sb.optimize(raw, raw[-1], n=3)
+    assert r["trials"] == 3 + len(ob.tr.PRESETS)
+    assert r["trainDays"][1] < r["testDays"][0], "unseen days must come after the train days"
+    for x in r["top"]:
+        assert set(x) == {"settings", "train", "test", "today"}
+    p = sb.price_summary(raw[0][1])
+    assert p["high"] >= p["last"] >= p["low"] and p["rangePct"] >= 0
+
+
 if __name__ == "__main__":
     fails = 0
     for name, fn in list(globals().items()):
