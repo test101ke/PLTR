@@ -7,8 +7,11 @@ on:
   workflow_dispatch:
     inputs:
       days:
-        description: "Trading days to test"
+        description: "Trading days to test (1-minute study)"
         default: "200"
+      tick_days:
+        description: "Trading days to test (1-second study, trade history)"
+        default: "60"
   schedule:
     - cron: "30 21 * * 1-5"      # 21:30 UTC = after the 16:00 New York close
 
@@ -39,6 +42,13 @@ jobs:
         run: |
           set -o pipefail
           python backtest.py 2>&1 | tee backtest.txt
+      - name: 1-second ORB backtest (16:30-16:45 EAT, built from trades)
+        if: always()
+        env:
+          TICK_DAYS: ${{ github.event.inputs.tick_days || '60' }}
+        run: |
+          set -o pipefail
+          python tick_backtest.py 2>&1 | tee tick_backtest.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -46,4 +56,6 @@ jobs:
           path: |
             backtest.txt
             static/backtest.json
+            tick_backtest.txt
+            static/tick_backtest.json
           if-no-files-found: ignore

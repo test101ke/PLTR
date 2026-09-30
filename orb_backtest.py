@@ -24,9 +24,10 @@ NY = tr.NY
 HALF_SPREAD = 0.0001
 
 
-def bar_ticks(t_ms, o, h, l, c):
+def bar_ticks(t_ms, o, h, l, c, span_ms=60_000):
+    """Four prices per bar: open, the far extreme, the near extreme, close."""
     path = [o, l, h, c] if c >= o else [o, h, l, c]
-    return [(t_ms + off * 1000, p) for off, p in zip((0, 15, 30, 59), path)]
+    return [(t_ms + int(f * span_ms), p) for f, p in zip((0, 0.25, 0.5, 0.98), path)]
 
 
 def _fill(side, bid, ask, cfg):
@@ -34,10 +35,12 @@ def _fill(side, bid, ask, cfg):
     return ask * (1 + slip) if side == "buy" else bid * (1 - slip)
 
 
-def replay(cfg, raw):
-    """raw: [(day, {minute_ms: [t,o,h,l,c,v]}, close)] as backtest.load_days returns.
+def replay(cfg, raw, span_ms=60_000, use_flow=False):
+    """raw: [(day, {bar_ms: [t,o,h,l,c,v(,buyShare)]}, close)]. 1-minute bars come from
+    backtest.load_days, 1-second bars from tick_backtest. use_flow: feed each bar's
+    taker buy share (0-100) as the order-flow lean instead of switching the filter off.
     Returns one row per closed position: {day, side, pnl, exits}."""
-    cfg = tr.clean_config({**cfg, "imbalanceMin": 50})
+    cfg = tr.clean_config(cfg if use_flow else {**cfg, "imbalanceMin": 50})
     s = tr.OrbStrategy(cfg, cfg["paperEquity"])
     fee = tr.fee_pct(cfg) / 100
     trades, cur = [], None
@@ -46,11 +49,13 @@ def replay(cfg, raw):
         for t in sorted(win):
             if t < op:
                 continue
-            _, o, h, l, c = win[t][:5]
-            for ts, px in bar_ticks(t, o, h, l, c):
+            row = win[t]
+            _, o, h, l, c = row[:5]
+            lean = row[6] if use_flow and len(row) > 6 and row[6] is not None else 50.0
+            for ts, px in bar_ticks(t, o, h, l, c, span_ms):
                 now = dt.datetime.fromtimestamp(ts / 1000, NY)
                 bid, ask = px * (1 - HALF_SPREAD), px * (1 + HALF_SPREAD)
-                for act in s.on_tick(now, bid, ask, 50.0):
+                for act in s.on_tick(now, bid, ask, lean):
                     if act[0] == "open":
                         side = act[1]
                         price = _fill("buy" if side == "long" else "sell", bid, ask, cfg)
@@ -92,14 +97,14 @@ def summarize(trades, days):
             "maxDrawdown": round(dd, 2)}
 
 
-def study(raw, base_cfg=None):
+def study(raw, base_cfg=None, span_ms=60_000, use_flow=False):
     """Every preset on the same days. P&L is in USDT per $100-margin batch at 10x."""
     raw = [r for r in raw if r[1]]
     cut = int(len(raw) * 0.7)
     out = {}
     for name, p in tr.PRESETS.items():
         cfg = {**(base_cfg or {}), **{k: v for k, v in p.items() if k not in ("label", "note")}}
-        trades = replay(cfg, raw)
+        trades = replay(cfg, raw, span_ms, use_flow)
         newest_days = {str(d) for d, _, _ in raw[cut:]}
         out[name] = {"label": p["label"], "all": summarize(trades, len(raw)),
                      "newest30": summarize([t for t in trades if t["day"] in newest_days], len(raw) - cut)}
