@@ -127,7 +127,7 @@ Research scripts (AMD and timeframe replays) live in `research/`.
 
 ## Accounts and the Trading page
 
-The site needs a sign-in. Anyone can **create an account with a unique username and password** (8+ characters), up to **10 accounts**. Set `SIGNUP_CODE` to require a code as well.
+The dashboard is open to everyone; only trading needs an account (the Trade button asks you to sign in). Anyone can **create an account with a unique username and password** (8+ characters), up to **10 accounts**. Set `SIGNUP_CODE` to require a code as well.
 
 Each account has its own:
 - **trading settings**, restored whenever you sign in;

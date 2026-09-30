@@ -592,7 +592,7 @@ async function jfetch(path,method="GET",body){
 }
 $("#userBtn").onclick=e=>{e.stopPropagation();$("#userMenu").hidden=!$("#userMenu").hidden;};
 document.addEventListener("click",e=>{if(!e.target.closest("#userMenu"))$("#userMenu").hidden=true;});
-$("#umLogout").onclick=async()=>{try{await jfetch("/api/logout","POST",{});}catch(e){}location.href="/login";};
+$("#umLogout").onclick=async()=>{try{await jfetch("/api/logout","POST",{});}catch(e){}location.href="/";};
 /* ---------- trading panel ---------- */
 const TP={st:null,view:null};
 const tapi=(p,m,b)=>jfetch("/api/trade/"+p,m,b);

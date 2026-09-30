@@ -69,7 +69,7 @@ button.go{width:100%;appearance:none;border:0;border-radius:10px;padding:11px;fo
 <main>
   <form class="card" id="f" autocomplete="on">
     <h1>PLTR Desk</h1>
-    <p class="sub" id="sub">Sign in to your account.</p>
+    <p class="sub" id="sub">Sign in to trade. The dashboard is open without an account.</p>
     <div class="seg" role="group" aria-label="Sign in or create an account">
       <button type="button" data-m="in" aria-pressed="true">Sign in</button>
       <button type="button" data-m="up" aria-pressed="false">Create account</button>
@@ -80,21 +80,23 @@ button.go{width:100%;appearance:none;border:0;border-radius:10px;padding:11px;fo
     <button class="go" type="submit" id="go">Sign in</button>
     <p class="err" id="err" role="alert"></p>
     <p class="hint" id="hint"></p>
+    <p class="hint"><a href="/" style="color:var(--accent)">← Back to the dashboard</a></p>
   </form>
 </main>
 <script>
 const $=s=>document.querySelector(s);let mode="in",ME={};
+const NEXT=(()=>{const n=new URLSearchParams(location.search).get("next")||"/trade";return /^\/(?!\/)[\w\-\/.#]*$/.test(n)?n:"/trade";})();
 try{const t=localStorage.getItem("pltr-theme");if(t)document.documentElement.setAttribute("data-theme",t);}catch(e){}
 function setMode(m){mode=m;document.querySelectorAll(".seg button").forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.m===m)));
-  $("#go").textContent=m==="in"?"Sign in":"Create account";$("#sub").textContent=m==="in"?"Sign in to your account.":"Pick a unique username. Your settings, keys and results stay with it.";
+  $("#go").textContent=m==="in"?"Sign in":"Create account";$("#sub").textContent=m==="in"?"Sign in to trade. The dashboard is open without an account.":"Pick a unique username. Your settings, keys and results stay with it.";
   $("#pw").autocomplete=m==="in"?"current-password":"new-password";$("#codeBox").hidden=!(m==="up"&&ME.signupCode);$("#err").textContent="";}
 document.querySelector(".seg").onclick=e=>{const b=e.target.closest("button");if(b)setMode(b.dataset.m);};
-fetch("/api/me",{cache:"no-store"}).then(r=>r.json()).then(m=>{ME=m;if(m.name)location.href="/";
+fetch("/api/me",{cache:"no-store"}).then(r=>r.json()).then(m=>{ME=m;if(m.name)location.href=NEXT;
   $("#hint").textContent=`${m.accounts} of ${m.maxAccounts} accounts used.`;if(m.accounts>=m.maxAccounts)document.querySelector('[data-m="up"]').disabled=true;}).catch(()=>{});
 $("#f").onsubmit=async e=>{e.preventDefault();$("#err").textContent="";$("#go").disabled=true;
   try{const r=await fetch(mode==="in"?"/api/login":"/api/signup",{method:"POST",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({name:$("#name").value.trim(),password:$("#pw").value,code:$("#code").value})});
-    const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.detail||"failed");location.href="/";}
+    const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.detail||"failed");location.href=NEXT;}
   catch(err){$("#err").textContent=err.message;}finally{$("#go").disabled=false;}};
 </script>
 </body>

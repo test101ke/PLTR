@@ -1243,8 +1243,13 @@ async def api_backtest_run():
 
 # ============================================================ ACCOUNTS + SIGN-IN (accounts.py)
 SESSION_COOKIE = "desk_session"
-PUBLIC = ("/login", "/api/login", "/api/signup", "/api/me", "/healthz", "/sw.js", "/manifest.webmanifest",
-          "/favicon.ico", "/static/icons/", "/static/manifest.webmanifest")
+# The dashboard is open to anyone. Only trading needs an account: the Trading
+# page, its API, account actions, and the raw log (it holds every account's trades).
+PROTECTED = ("/trade", "/static/trade.html", "/api/trade/", "/api/account/", "/api/log")
+
+
+def _protected(path):
+    return any(path == p or (p.endswith("/") and path.startswith(p)) for p in PROTECTED)
 
 
 def current_user(request: Request):
@@ -1301,10 +1306,10 @@ async def require_login(request: Request, call_next):
     if request.method not in ("GET", "HEAD") and path.startswith("/api/") \
             and "application/json" not in request.headers.get("content-type", ""):
         return JSONResponse({"detail": "JSON body required"}, status_code=415)   # blocks form-based CSRF
-    if not any(path == p or (p.endswith("/") and path.startswith(p)) for p in PUBLIC) and not current_user(request):
+    if _protected(path) and not current_user(request):
         if path.startswith("/api/"):
             return JSONResponse({"detail": "sign in required"}, status_code=401)
-        return RedirectResponse("/login", status_code=303)
+        return RedirectResponse("/login?next=" + path, status_code=303)
     return await call_next(request)
 
 
