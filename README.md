@@ -172,6 +172,10 @@ The Opening Range Breakout trader (`trader.py`) trades the **PLTR USDT perpetual
 
 Sandboxed build machines often cannot reach the exchanges, so `.github/workflows/backtest.yml` runs the backtest on GitHub's servers: open the repo's **Actions** tab, pick **Live backtest**, press **Run workflow**. It also runs every weekday after the US close. The result is in the run log and as a downloadable `backtest-result` file.
 
+## 1-second backtest (16:30-16:45 EAT)
+
+`tick_backtest.py` downloads every PLTR perpetual trade between 16:30:00 and 16:45:00 EAT (09:30-09:45 New York) for recent days, builds 1-second bars from them (with the taker buy share over the last 10 seconds), and replays every ORB preset second by second, with and without the order-flow filter. It runs in the same GitHub workflow (`tick_days` input, default 60).
+
 ## Endpoints
 - `/` dashboard · `/api/state` full JSON state · `/api/amd` AMD payload · `/api/filings` insiders + congress · `/api/backtest` edge study · `/healthz` health check.
 - PWA: `/manifest.webmanifest` · `/sw.js` (served from root so its scope covers the whole site) · `/favicon.ico`.
