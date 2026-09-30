@@ -1,0 +1,43 @@
+name: Session backtest + optimise
+
+# Today's session from the 16:30 EAT open to the moment this runs, second by
+# second, plus a settings search judged on days it never saw. Start it from the
+# Actions tab ("Run workflow").
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "today | optimize | all"
+        default: "all"
+      trials:
+        description: "Settings to try"
+        default: "400"
+      tick_days:
+        description: "Past trading days for the search"
+        default: "60"
+
+jobs:
+  session:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Run
+        env:
+          OPT_TRIALS: ${{ github.event.inputs.trials || '400' }}
+          TICK_DAYS: ${{ github.event.inputs.tick_days || '60' }}
+        run: |
+          set -o pipefail
+          python session_backtest.py ${{ github.event.inputs.mode || 'all' }} 2>&1 | tee session.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: session-result
+          path: |
+            session.txt
+            static/session_backtest.json
+          if-no-files-found: ignore
