@@ -1159,11 +1159,13 @@ tick();setInterval(tick,1000);
   const menu=$("#userMenu");
   $("#userBtn").onclick=e=>{e.stopPropagation();menu.hidden=!menu.hidden;};
   document.addEventListener("click",e=>{if(!e.target.closest("#userMenu"))menu.hidden=true;});
-  $("#umLogout").onclick=async()=>{try{await fetch("/api/logout",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});}catch(e){}location.href="/login";};
-  fetch("/api/me",{cache:"no-store"}).then(r=>r.json()).then(m=>{if(!m.name)location.href="/login";else $("#userName").textContent=m.name;}).catch(()=>{});
-  const chip=async()=>{try{const r=await fetch("/api/trade/status",{cache:"no-store"});if(r.status===401){location.href="/login";return;}
+  $("#umLogout").onclick=async()=>{try{await fetch("/api/logout",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});}catch(e){}location.reload();};
+  let signedIn=false;
+  fetch("/api/me",{cache:"no-store"}).then(r=>r.json()).then(m=>{signedIn=!!m.name;
+    if(signedIn){$("#userName").textContent=m.name;chip();setInterval(chip,5000);}
+    else{const b=$("#userBtn");b.textContent="Sign in";b.onclick=()=>{location.href="/login?next=/trade";};}}).catch(()=>{});
+  const chip=async()=>{try{const r=await fetch("/api/trade/status",{cache:"no-store"});if(r.status===401){return;}
     const st=await r.json(),b=$("#tradeSt");b.textContent=st.mode==="live"?"LIVE":st.mode==="paper"?"paper":"off";b.className="st "+(st.mode==="off"?"":st.mode);}catch(e){}};
-  chip();setInterval(chip,5000);
 })();
 </script>
 </body>

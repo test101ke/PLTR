@@ -102,9 +102,12 @@ def test_app_flow_isolation_and_encryption():
     import main, trader as tr
     from test_trader import FakeCcxt
     anon = TestClient(main.app)
+    assert anon.get("/", follow_redirects=False).status_code == 200, "the dashboard must be open to everyone"
+    assert anon.get("/api/state").status_code == 200
     assert anon.get("/api/trade/status").status_code == 401
-    r = anon.get("/", follow_redirects=False)
-    assert r.status_code == 303 and r.headers["location"] == "/login"
+    assert anon.get("/api/log").status_code == 401, "the raw log holds every account's trades"
+    r = anon.get("/trade", follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == "/login?next=/trade"
     assert anon.get("/login").status_code == 200 and anon.get("/healthz").status_code == 200
     assert anon.post("/api/login", data="name=x&password=y",
                      headers={"content-type": "application/x-www-form-urlencoded"}).status_code == 415
