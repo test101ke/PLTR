@@ -464,6 +464,100 @@ a.navlink{font-size:13px;font-weight:600;color:var(--accent);text-decoration:non
   .tp input,.tp select{min-height:44px}
   details.adv>summary{min-height:44px}
 }
+
+/* ---------- mission control HUD: is the agent really running? ---------- */
+.hud{--h-bg:#04070d;--h-line:rgba(120,200,255,.16);--h-ink:#dff6ff;--h-dim:#6f8ba0;--h-glow:#00e5ff;
+  --h-ok:#3dffa8;--h-warn:#ffcc33;--h-bad:#ff3b5c;
+  position:relative;overflow:hidden;border-radius:20px;padding:18px 20px 16px;color:var(--h-ink);
+  background:radial-gradient(120% 90% at 15% 0%,rgba(0,229,255,.10),transparent 60%),
+    radial-gradient(90% 80% at 100% 100%,rgba(140,90,255,.10),transparent 60%),var(--h-bg);
+  border:1px solid var(--h-line);box-shadow:0 0 0 1px rgba(0,0,0,.4),0 20px 50px -30px rgba(0,229,255,.35);
+  font-family:ui-monospace,"SF Mono",SFMono-Regular,Menlo,monospace;font-variant-numeric:tabular-nums}
+.hud.is-paper{--h-glow:#00e5ff}
+.hud.is-live{--h-glow:#ff2d7a;box-shadow:0 0 0 1px rgba(255,45,122,.35),0 20px 60px -24px rgba(255,45,122,.55)}
+.hud.is-off{--h-glow:#5d7486}
+.hud::before{content:"";position:absolute;inset:0;pointer-events:none;opacity:.5;
+  background-image:linear-gradient(var(--h-line) 1px,transparent 1px),linear-gradient(90deg,var(--h-line) 1px,transparent 1px);
+  background-size:28px 28px;-webkit-mask-image:radial-gradient(80% 70% at 50% 40%,#000,transparent);mask-image:radial-gradient(80% 70% at 50% 40%,#000,transparent)}
+.hud::after{content:"";position:absolute;left:0;right:0;height:80px;top:-80px;pointer-events:none;
+  background:linear-gradient(transparent,color-mix(in srgb,var(--h-glow) 10%,transparent),transparent)}
+.hud.is-on::after{animation:scan 4s linear infinite}
+@keyframes scan{to{top:110%}}
+.hud>*{position:relative}
+.hud-top{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:10.5px;letter-spacing:.18em;text-transform:uppercase;color:var(--h-dim)}
+.hud-top .sp{flex:1}
+.hud-top b{color:var(--h-glow);font-weight:600}
+.hud-main{display:grid;grid-template-columns:200px minmax(0,1fr);gap:22px;align-items:center;margin-top:12px}
+.core{position:relative;width:200px;height:200px;display:grid;place-items:center}
+.core svg{position:absolute;inset:0;width:100%;height:100%}
+.core .r1,.core .r2{transform-origin:100px 100px}
+.hud.is-on .core .r1{animation:spin 9s linear infinite}
+.hud.is-on .core .r2{animation:spin 5s linear infinite reverse}
+@keyframes spin{to{transform:rotate(360deg)}}
+.core .glow{filter:drop-shadow(0 0 6px var(--h-glow))}
+.core-txt{text-align:center;z-index:1}
+.core-mode{font-size:25px;font-weight:700;letter-spacing:.14em;color:var(--h-glow);text-shadow:0 0 18px var(--h-glow)}
+.core-sub{font-size:9.5px;letter-spacing:.16em;max-width:118px;margin-left:auto;margin-right:auto;line-height:1.35;color:var(--h-dim);margin-top:4px;text-transform:uppercase}
+.core-up{font-size:13px;color:var(--h-ink);margin-top:6px}
+.hud.is-on .core-mode{animation:breathe 2.4s ease-in-out infinite}
+@keyframes breathe{50%{opacity:.62}}
+.lights{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.lt{border:1px solid var(--h-line);border-radius:12px;padding:9px 10px;background:rgba(255,255,255,.02);min-width:0}
+.lt .k{display:flex;align-items:center;gap:6px;font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--h-dim)}
+.lt .v{font-size:16px;font-weight:600;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lt .x{font-size:10.5px;color:var(--h-dim);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.led{width:7px;height:7px;border-radius:50%;background:#33414d;flex:none}
+.led.ok{background:var(--h-ok);box-shadow:0 0 8px var(--h-ok)}
+.led.warn{background:var(--h-warn);box-shadow:0 0 8px var(--h-warn)}
+.led.bad{background:var(--h-bad);box-shadow:0 0 8px var(--h-bad)}
+.led.ok.blink{animation:blink 1s steps(2) infinite}
+@keyframes blink{50%{opacity:.35}}
+.quote{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:14px;align-items:center;margin-top:10px;
+  border:1px solid var(--h-line);border-radius:12px;padding:10px 12px;background:rgba(255,255,255,.02)}
+.quote .px{font-size:22px;font-weight:700;letter-spacing:-.01em}
+.quote .ba{font-size:11px;color:var(--h-dim);line-height:1.5}
+.quote .ba .b{color:var(--h-ok)}.quote .ba .a{color:var(--h-bad)}
+.spark{width:100%;height:46px;display:block}
+.sparkbox{position:relative;min-width:0}
+.sparkmsg{position:absolute;inset:0;display:grid;place-items:center;font-size:11px;color:var(--h-dim);text-align:center}
+.lean{height:4px;border-radius:9px;background:rgba(255,59,92,.45);overflow:hidden;margin-top:6px}
+.lean i{display:block;height:100%;background:var(--h-ok)}
+.hud-stats{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;margin-top:12px}
+.hs{border-left:2px solid var(--h-glow);padding:2px 0 2px 10px;min-width:0}
+.hs .k{font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--h-dim)}
+.hs .v{font-size:15px;font-weight:600;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hs .v.up{color:var(--h-ok)}.hs .v.down{color:var(--h-bad)}
+.hs .x{font-size:10.5px;color:var(--h-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.feed{margin-top:12px;border-top:1px dashed var(--h-line);padding-top:8px;font-size:11px;line-height:1.6;color:var(--h-dim);
+  max-height:76px;overflow:hidden}
+.feed div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.feed div:first-child{color:var(--h-ink)}
+.feed .t{color:var(--h-glow);margin-right:8px}
+.hud-ctl{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+.hb{appearance:none;font:inherit;font-size:12px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;cursor:pointer;
+  padding:11px 16px;border-radius:11px;min-height:44px;border:1px solid var(--h-line);background:rgba(255,255,255,.03);color:var(--h-ink);transition:.15s}
+.hb:hover:not(:disabled){border-color:var(--h-glow);box-shadow:0 0 16px -4px var(--h-glow)}
+.hb:disabled{opacity:.35;cursor:not-allowed}
+.hb.hb-paper{border-color:rgba(0,229,255,.55);color:#00e5ff}
+.hb.hb-live{border-color:rgba(255,45,122,.55);color:#ff2d7a}
+.hb.hb-stop{margin-left:auto}
+.hud-note{font-size:10.5px;color:var(--h-dim);margin:8px 0 0;letter-spacing:.02em;font-family:-apple-system,system-ui,sans-serif}
+.hud-err{margin-top:10px;padding:8px 10px;border-radius:10px;border:1px solid rgba(255,59,92,.5);color:#ff8fa3;font-size:11.5px}
+.hud.is-boot .core-mode{animation:breathe .5s ease-in-out infinite}
+@media (max-width:860px){
+  .hud-main{grid-template-columns:1fr;justify-items:center;gap:14px}
+  .hud-main>.right{width:100%}
+  .lights{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .hud-stats{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .hud-stats .hs:last-child{grid-column:1/-1}
+}
+@media (max-width:620px){
+  .hud{padding:14px 13px;border-radius:16px}
+  .core{width:170px;height:170px}
+  .core-mode{font-size:21px}
+  .hud-ctl .hb{flex:1 1 auto}.hb.hb-stop{margin-left:0}
+}
+@media (prefers-reduced-motion:reduce){.hud *,.hud::after{animation:none!important}}
 </style>
 </head>
 <body>
@@ -487,6 +581,48 @@ a.navlink{font-size:13px;font-weight:600;color:var(--accent);text-decoration:non
 
   <div class="tp tp-page">
     <div class="msg err card" id="tpErr" style="padding:10px 14px" hidden></div>
+    <section class="hud is-off" id="hud" aria-live="polite">
+      <div class="hud-top"><span>PLTR · ORB AGENT</span><span>//</span><span id="hudVenue">no feed</span><span class="sp"></span><span id="hudClock">--:--:-- EAT</span></div>
+      <div class="hud-main">
+        <div class="core" aria-hidden="false">
+          <svg viewBox="0 0 200 200" aria-hidden="true">
+            <circle cx="100" cy="100" r="94" fill="none" stroke="rgba(120,200,255,.12)" stroke-width="1"/>
+            <circle class="r1 glow" cx="100" cy="100" r="86" fill="none" stroke="var(--h-glow)" stroke-width="2" stroke-dasharray="60 30 8 30" stroke-linecap="round"/>
+            <circle class="r2" cx="100" cy="100" r="74" fill="none" stroke="var(--h-glow)" stroke-opacity=".45" stroke-width="1.2" stroke-dasharray="2 6"/>
+            <circle cx="100" cy="100" r="62" fill="rgba(0,0,0,.35)" stroke="rgba(120,200,255,.14)"/>
+          </svg>
+          <div class="core-txt"><div class="core-mode" id="hudMode">STANDBY</div><div class="core-sub" id="hudSub">agent offline</div><div class="core-up" id="hudUp">00:00:00</div></div>
+        </div>
+        <div class="right">
+          <div class="lights">
+            <div class="lt"><div class="k"><span class="led" id="ledEng"></span>Engine</div><div class="v" id="ltEng">off</div><div class="x" id="ltEngX">heartbeat</div></div>
+            <div class="lt"><div class="k"><span class="led" id="ledFeed"></span>Market feed</div><div class="v" id="ltFeed">–</div><div class="x" id="ltFeedX">data age</div></div>
+            <div class="lt"><div class="k"><span class="led" id="ledAgent"></span>Agent</div><div class="v" id="ltAgent">–</div><div class="x">checks per second</div></div>
+            <div class="lt"><div class="k"><span class="led" id="ledOrd"></span>Orders</div><div class="v" id="ltOrd">–</div><div class="x" id="ltOrdX">last second</div></div>
+          </div>
+          <div class="quote">
+            <div><div class="px" id="hudPx">–</div><div class="ba"><span class="b" id="hudBid">bid –</span> · <span class="a" id="hudAsk">ask –</span></div></div>
+            <div class="sparkbox"><svg class="spark" id="hudSpark" viewBox="0 0 300 46" preserveAspectRatio="none" aria-label="Price, last 3 minutes"></svg><div class="sparkmsg" id="hudSparkMsg"></div></div>
+            <div style="min-width:86px"><div class="ba">book lean</div><div style="font-size:14px;font-weight:600" id="hudLean">–</div><div class="lean"><i id="hudLeanBar" style="width:50%"></i></div></div>
+          </div>
+        </div>
+      </div>
+      <div class="hud-stats">
+        <div class="hs"><div class="k">Phase</div><div class="v" id="hsPhase">stopped</div><div class="x" id="hsCount">–</div></div>
+        <div class="hs"><div class="k">Opening range</div><div class="v" id="hsRange">–</div><div class="x" id="hsRangeX">&nbsp;</div></div>
+        <div class="hs"><div class="k">Position</div><div class="v" id="hsPos">flat</div><div class="x" id="hsPosX">&nbsp;</div></div>
+        <div class="hs"><div class="k">Open P&amp;L</div><div class="v" id="hsOpen">$0.00</div><div class="x">unrealised</div></div>
+        <div class="hs"><div class="k">Today</div><div class="v" id="hsDay">$0.00</div><div class="x" id="hsDayX">0 trades</div></div>
+      </div>
+      <div class="feed" id="hudFeed"><div><span class="t">--:--:--</span>waiting for start</div></div>
+      <div class="hud-err" id="hudErr" hidden></div>
+      <div class="hud-ctl">
+        <button class="hb hb-paper" type="button" id="tpPaper">▶ Start paper</button>
+        <button class="hb hb-live" type="button" id="tpLive">◉ Go live…</button>
+        <button class="hb hb-stop" type="button" id="tpStop">■ Stop &amp; flatten</button>
+      </div>
+      <p class="hud-note">Green lights = the agent is really working: engine heartbeat under 1.5 s and market data under 3 s old. Paper uses the live order book with simulated fills and fees. Live sends real orders and must be armed each day.</p>
+    </section>
 
     <section class="card">
       <div class="sect-title"><h2>Profitability</h2>
@@ -503,14 +639,8 @@ a.navlink{font-size:13px;font-weight:600;color:var(--accent);text-decoration:non
     </section>
 
     <section class="card">
-      <div class="sect-title"><h2>Run</h2><span class="msg" id="tpNow"></span></div>
-      <div class="row">
-        <button class="b pri" type="button" id="tpPaper">Start paper</button>
-        <button class="b live" type="button" id="tpLive">Go live…</button>
-        <button class="b" type="button" id="tpStop">Stop &amp; flatten</button>
-      </div>
-      <p class="msg" style="margin:8px 0 0">Paper uses the live order book and simulates fills with fees and slippage, and keeps running after restarts. Live sends real orders with your saved keys and must be armed each day.</p>
-      <div class="sect-title" style="margin-top:14px"><h2 style="font-size:13px">Exit style</h2></div>
+      <div class="sect-title"><h2>Strategy</h2><span class="msg" id="tpNow"></span></div>
+      <div class="sect-title"><h2 style="font-size:13px">Exit style</h2></div>
       <div class="row" id="tpPresets"></div>
       <p class="msg" id="tpPresetNote" style="margin:6px 0 0"></p>
       <div id="orbBt" style="margin-top:10px"></div>
@@ -631,6 +761,7 @@ function renderTrade(st){
     errBox("#tpErr",st.error||"");
   }
   renderOrbBt(st.orbBacktest);
+  renderHud(st);
   const p=st.position,r=st.range,s=st.stats||{};
   const t=[["Phase",st.phase||"stopped",st.symbol||"PLTR perp"],
     ["Opening range",r&&r.high!=null?`${(+r.low).toFixed(2)} – ${(+r.high).toFixed(2)}`:"–",""],
@@ -642,6 +773,73 @@ function renderTrade(st){
   $("#tpTiles").innerHTML=t.map(x=>`<div class="tile"><div class="k">${x[0]}</div><div class="v mono" style="font-size:14px">${esc(String(x[1]))}</div><div class="x">${esc(String(x[2]))}</div></div>`).join("");
   const ev=(st.events||[]).slice().reverse();
   $("#tpEvents").innerHTML=ev.length?ev.map(e=>`<div>${esc(e.at.slice(11,19))}Z ${esc(e.msg)}</div>`).join(""):"No activity yet.";
+}
+/* ---------- mission control HUD ---------- */
+const HUD={mids:[],boot:null};
+const pad2=n=>String(n).padStart(2,"0");
+const hms=ms=>{ms=Math.max(0,Math.floor(ms/1000));return `${pad2(Math.floor(ms/3600))}:${pad2(Math.floor(ms/60)%60)}:${pad2(ms%60)}`;};
+const EAT_MS=3*3600e3;
+function openMs(openEAT,dayOffset=0){            // today's (or a later day's) open, as epoch ms
+  const [h,m]=(openEAT||"16:30").split(":").map(Number),e=new Date(Date.now()+EAT_MS);
+  return Date.UTC(e.getUTCFullYear(),e.getUTCMonth(),e.getUTCDate()+dayOffset,h,m)-EAT_MS;
+}
+function led(id,state,blink){const el=$(id);el.className="led"+(state?" "+state:"")+(blink?" blink":"");}
+function renderHud(st){
+  const H=$("#hud"),m=st.mode,en=st.engine||{},s=st.stats||{},c=st.config||{},b=st.book,on=m!=="off";
+  const booting=HUD.boot&&!(on&&en.alive);
+  H.className="hud "+(on?`is-${m} is-on`:(booting?`is-${HUD.boot} is-boot`:"is-off"));
+  const e=new Date(Date.now()+EAT_MS);
+  $("#hudClock").textContent=`${pad2(e.getUTCHours())}:${pad2(e.getUTCMinutes())}:${pad2(e.getUTCSeconds())} EAT`;
+  $("#hudVenue").textContent=on?`${c.exchange==="binanceusdm"?"BINANCE":"BYBIT"} · ${st.symbol||""}`:"no feed";
+  $("#hudMode").textContent=booting?"BOOTING":on?(m==="live"?"LIVE":"PAPER"):"STANDBY";
+  $("#hudSub").textContent=booting?"connecting to exchange":on?(en.alive?(m==="live"?"real orders · armed":"sim fills · live data"):"engine not responding"):"agent offline";
+  $("#hudUp").textContent=on&&en.since?"uptime "+hms(Date.now()-Date.parse(en.since)):"uptime 00:00:00";
+  // lights
+  const beat=en.beatAgeMs,age=en.dataAgeMs;
+  led("#ledEng",!on?"":en.alive&&beat<1500?"ok":beat!=null&&beat<3000?"warn":"bad",on&&en.alive);
+  $("#ltEng").textContent=!on?"off":en.alive?"online":"stalled";
+  $("#ltEngX").textContent=beat!=null?`heartbeat ${beat} ms ago`:"heartbeat";
+  led("#ledFeed",!on?"":age==null?"bad":age<3000?"ok":age<10000?"warn":"bad");
+  $("#ltFeed").textContent=!on?"–":age==null?"no data":age<1000?`${age} ms`:`${(age/1000).toFixed(1)} s`;
+  $("#ltFeedX").textContent=on?`data age · ${s.bookUpdatesPerSec||0} upd/s`:"data age";
+  const cps=s.checksPerSec||0;
+  led("#ledAgent",!on?"":cps>=5?"ok":cps>0?"warn":"bad");
+  $("#ltAgent").textContent=on?`${cps}/s`:"–";
+  const ol=s.ordersLastSec||0,cap=c.maxOrdersPerSec||20;
+  led("#ledOrd",!on?"":ol>=cap?"warn":"ok");
+  $("#ltOrd").textContent=on?`${ol} / ${cap}`:"–";
+  // quote + sparkline (last 3 minutes, client side)
+  if(on&&b&&b.bid){const mid=(b.bid+b.ask)/2;HUD.mids.push(mid);if(HUD.mids.length>180)HUD.mids.shift();
+    $("#hudPx").textContent=mid.toFixed(2);$("#hudBid").textContent="bid "+(+b.bid).toFixed(2);$("#hudAsk").textContent="ask "+(+b.ask).toFixed(2);
+    const lean=Math.round(b.imb??50);$("#hudLean").textContent=`${lean}% buy`;$("#hudLeanBar").style.width=lean+"%";}
+  else if(!on){HUD.mids=[];$("#hudPx").textContent="–";$("#hudBid").textContent="bid –";$("#hudAsk").textContent="ask –";$("#hudLean").textContent="–";$("#hudLeanBar").style.width="50%";}
+  const v=HUD.mids,S=$("#hudSpark");
+  if(v.length>1){const lo=Math.min(...v),hi=Math.max(...v),sp=(hi-lo)||1,X=i=>i/(v.length-1)*300,Y=x=>42-(x-lo)/sp*38;
+    const d=v.map((x,i)=>(i?"L":"M")+X(i).toFixed(1)+" "+Y(x).toFixed(1)).join(" ");
+    const r=st.range,ln=[];if(r&&r.high!=null)[r.high,r.low].forEach(p=>{if(p>=lo&&p<=hi)ln.push(`<line x1="0" x2="300" y1="${Y(p).toFixed(1)}" y2="${Y(p).toFixed(1)}" stroke="var(--h-warn)" stroke-opacity=".5" stroke-dasharray="3 4" vector-effect="non-scaling-stroke"/>`);});
+    S.innerHTML=ln.join("")+`<path d="${d} L300 46 L0 46Z" fill="var(--h-glow)" fill-opacity=".08"/><path d="${d}" fill="none" stroke="var(--h-glow)" stroke-width="1.6" vector-effect="non-scaling-stroke"/>`;}
+  else S.innerHTML="";
+  $("#hudSparkMsg").textContent=v.length>1?"":on?"waiting for ticks":"start an agent to stream price";
+  // stats
+  const ph=on?st.phase:"stopped",op=openMs(st.openEAT);let tgt=null,lab="";
+  if(ph==="before open"){tgt=op;lab="opens in";}
+  else if(ph==="building range"){tgt=op+(c.orbMinutes||2)*60e3;lab="range locks in";}
+  else if(ph==="trading"){tgt=op+(c.exitAfterMin||15)*60e3;lab="window closes in";}
+  else{tgt=Date.now()<op?op:openMs(st.openEAT,1);lab="next open in";}
+  $("#hsPhase").textContent=ph;$("#hsCount").textContent=`${lab} ${hms(tgt-Date.now())}`;
+  const r=st.range;$("#hsRange").textContent=r&&r.high!=null?`${(+r.low).toFixed(2)}–${(+r.high).toFixed(2)}`:"–";
+  $("#hsRangeX").textContent=r&&r.high!=null?`width ${((r.high/r.low-1)*100).toFixed(2)}%`:`${c.orbMinutes||2} min from open`;
+  const p=st.position;$("#hsPos").textContent=p?`${p.side.toUpperCase()} ${(+p.qty).toFixed(2)}`:"flat";
+  $("#hsPos").className="v "+(p?(p.side==="long"?"up":"down"):"");
+  $("#hsPosX").textContent=p?`@ ${(+p.entry).toFixed(2)}${p.tp1?" · trailing":""}`:`${st.tradesToday||0} / ${c.maxTrades||"–"} trades used`;
+  const u=st.unrealized||0;$("#hsOpen").textContent=usd(u);$("#hsOpen").className="v "+sgnCls(u);
+  const pf=(st.performance||{})[on?m:(st.view||"paper")]||{},day=pf.today||0;
+  $("#hsDay").textContent=usd(day);$("#hsDay").className="v "+sgnCls(day);$("#hsDayX").textContent=`${pf.todayTrades||0} trades · ${on?m:(st.view||"paper")}`;
+  const ev=(st.events||[]).slice(-4).reverse();
+  $("#hudFeed").innerHTML=ev.length?ev.map(x=>`<div><span class="t">${esc(x.at.slice(11,19))}Z</span>${esc(x.msg)}</div>`).join(""):`<div><span class="t">--:--:--</span>waiting for start</div>`;
+  const err=st.error||(on&&!en.alive&&!booting?"Engine heartbeat lost. Press Stop, then start again.":"");
+  $("#hudErr").hidden=!err;$("#hudErr").textContent=err;
+  if(on&&en.alive)HUD.boot=null;
 }
 function renderOrbBt(ob){
   const el=$("#orbBt");
@@ -688,11 +886,14 @@ $("#tpPresets").addEventListener("click",e=>{const b=e.target.closest("button[da
     const n=((TP.st&&TP.st.presets)||{})[b.dataset.preset];$("#tpPresetNote").textContent=n?`${n.label}: ${n.note}`:"";})();});
 $("#tpSaveCfg").onclick=act(async()=>{const cfg={};CFG_KEYS.forEach(k=>{const el=$("#c-"+k);if(el)cfg[k]=el.value;});
   const r=await tapi("config","POST",cfg);fillCfg(r.config);$("#tpCfgMsg").textContent="saved";});
-$("#tpPaper").onclick=act(()=>tapi("start","POST",{mode:"paper"}));
-$("#tpLive").onclick=act(async()=>{const c=(TP.st&&TP.st.config)||{};
+const boot=(mode,fn)=>async()=>{HUD.boot=mode;if(TP.st)renderHud(TP.st);
+  $("#hud").scrollIntoView({behavior:"smooth",block:"start"});
+  await act(fn)();if(!(TP.st&&TP.st.mode!=="off"))HUD.boot=null;if(TP.st)renderHud(TP.st);};
+$("#tpPaper").onclick=boot("paper",()=>tapi("start","POST",{mode:"paper"}));
+$("#tpLive").onclick=()=>{const c=(TP.st&&TP.st.config)||{};
   const typed=prompt(`REAL MONEY. ${c.leverage}x leverage, $${c.batchUsd} margin per trade, up to ${c.maxTrades} trades, daily loss stop ${c.dailyLossPct}%.\nType LIVE to arm for today's session:`);
-  if(typed!=="LIVE")throw new Error("not armed (you must type LIVE)");
-  await tapi("start","POST",{mode:"live",confirm:"LIVE"});});
+  if(typed!=="LIVE"){errBox("#tpErr","not armed (you must type LIVE)");return;}
+  boot("live",()=>tapi("start","POST",{mode:"live",confirm:"LIVE"}))();};
 $("#tpStop").onclick=act(()=>tapi("stop","POST",{}));
 
 /* ---------- settings: API keys only ---------- */

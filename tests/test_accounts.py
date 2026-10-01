@@ -93,7 +93,9 @@ def test_settings_and_autostart_survive_restart():
 def test_unwritable_data_dir_falls_back_instead_of_crashing():
     a = ac.Accounts(data_dir="/proc/definitely-not-writable/data", env={"KEYS_SECRET": "k1"})
     assert a.dir.endswith("logs")
-    a.register("fallback_user", "password123")        # works, no crash
+    name = "fallback_" + os.urandom(3).hex()          # the fallback folder persists between runs
+    a.register(name, "password123")                   # works, no crash
+    a.delete(name, "password123")
 
 
 # ------------------------------------------------------------------ through the web app

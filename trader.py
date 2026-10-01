@@ -514,6 +514,7 @@ class TradeAgent:
         self.stats = {"checksPerSec": 0.0, "ordersLastSec": 0, "bookUpdatesPerSec": 0.0}
         self._order_times, self._busy = [], False
         self.error = None
+        self.started_at, self.beat = None, None   # engine heartbeat: proves the loop is alive
 
     # ---------------------------------------------------------- control
     def status(self):
@@ -532,11 +533,22 @@ class TradeAgent:
             "unrealized": round(s.unrealized(self.book["bid"], self.book["ask"]), 4) if (s and self.book) else 0.0,
             "halted": s.halted if s else None, "book": self.book, "stats": self.stats,
             "events": self.events[-30:], "trades": self.trades[-20:],
+            "engine": self.engine(),
             "view": self.mode if self.mode != "off" else (self.history[-1]["mode"] if self.history else "paper"),
             "performance": {m: performance(self.history, m, today=now.date().isoformat(),
                                            capital=self.cfg["paperEquity"] if m == "paper" else None)
                             for m in ("paper", "live")},
         }
+
+    def engine(self):
+        """Is the agent really working? Loop heartbeat age and market-data age, in ms."""
+        now = time.time()
+        alive = bool(self.task and not self.task.done() and self.beat and now - self.beat < 3)
+        ts = (self.book or {}).get("ts")
+        return {"running": self.mode != "off", "alive": alive, "since": self.started_at,
+                "beatAgeMs": round((now - self.beat) * 1000) if self.beat else None,
+                "dataAgeMs": max(0, round(now * 1000 - ts)) if (ts and self.mode != "off") else None,
+                "serverMs": round(now * 1000)}
 
     def apply_preset(self, name):
         if name not in PRESETS:
@@ -608,7 +620,7 @@ class TradeAgent:
         if mode == "live":
             self.live_armed_day = dt.datetime.now(NY).date()
         self.strategy = OrbStrategy(self.cfg, self.equity)
-        self.mode = mode
+        self.mode, self.started_at, self.beat = mode, _iso(), None
         self._event(f"started {mode} on {exchange_id} {self.symbol}, equity {self.equity:.2f} USDT, "
                     f"{self.cfg['leverage']}x")
         self.task = asyncio.create_task(self._run())
@@ -634,6 +646,7 @@ class TradeAgent:
                     pass
         self._event(f"{self.mode} stopped: {reason}")
         self.mode, self.live_armed_day, self.feed_ex = "off", None, None
+        self.started_at, self.beat = None, None
         return self.status()
 
     # ---------------------------------------------------------- loop
@@ -649,6 +662,7 @@ class TradeAgent:
                     self.error = f"market stream: {stream.exception()}"
                     stream = asyncio.create_task(self._stream())
                 now_m = time.monotonic()
+                self.beat = time.time()
                 gap = now_m - last_eval
                 fresh = self.book is not None and self.book.get("_new")
                 if self.book and gap >= min_gap and (fresh or gap >= max_gap):
