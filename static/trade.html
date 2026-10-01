@@ -542,6 +542,9 @@ a.navlink{font-size:13px;font-weight:600;color:var(--accent);text-decoration:non
 .hb.hb-live{border-color:rgba(255,45,122,.55);color:#ff2d7a}
 .hb.hb-stop{margin-left:auto}
 .hud-note{font-size:10.5px;color:var(--h-dim);margin:8px 0 0;letter-spacing:.02em;font-family:-apple-system,system-ui,sans-serif}
+.diag{margin-top:10px;display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px}
+.diag .d{border:1px solid var(--h-line);border-radius:10px;padding:8px 10px;font-size:11.5px;color:var(--h-dim)}
+.diag .d b{color:var(--h-ink);display:flex;align-items:center;gap:6px;font-size:12px;letter-spacing:.06em}
 .hud-err{margin-top:10px;padding:8px 10px;border-radius:10px;border:1px solid rgba(255,59,92,.5);color:#ff8fa3;font-size:11.5px}
 .hud.is-boot .core-mode{animation:breathe .5s ease-in-out infinite}
 @media (max-width:860px){
@@ -616,9 +619,11 @@ a.navlink{font-size:13px;font-weight:600;color:var(--accent);text-decoration:non
       </div>
       <div class="feed" id="hudFeed"><div><span class="t">--:--:--</span>waiting for start</div></div>
       <div class="hud-err" id="hudErr" hidden></div>
+      <div class="diag" id="hudDiagOut" hidden></div>
       <div class="hud-ctl">
         <button class="hb hb-paper" type="button" id="tpPaper">▶ Start paper</button>
         <button class="hb hb-live" type="button" id="tpLive">◉ Go live…</button>
+        <button class="hb" type="button" id="hudDiag">⌁ Check connection</button>
         <button class="hb hb-stop" type="button" id="tpStop">■ Stop &amp; flatten</button>
       </div>
       <p class="hud-note">Green lights = the agent is really working: engine heartbeat under 1.5 s and market data under 3 s old. Paper uses the live order book with simulated fills and fees. Live sends real orders and must be armed each day.</p>
@@ -792,7 +797,7 @@ function renderHud(st){
   $("#hudClock").textContent=`${pad2(e.getUTCHours())}:${pad2(e.getUTCMinutes())}:${pad2(e.getUTCSeconds())} EAT`;
   $("#hudVenue").textContent=on?`${c.exchange==="binanceusdm"?"BINANCE":"BYBIT"} · ${st.symbol||""}`:"no feed";
   $("#hudMode").textContent=booting?"BOOTING":on?(m==="live"?"LIVE":"PAPER"):"STANDBY";
-  $("#hudSub").textContent=booting?"connecting to exchange":on?(en.alive?(m==="live"?"real orders · armed":"sim fills · live data"):"engine not responding"):"agent offline";
+  $("#hudSub").textContent=booting?"connecting to exchange":on?(en.alive?(m==="live"?"real orders · armed":"sim fills · live data"):"engine not responding"):"offline · press start";
   $("#hudUp").textContent=on&&en.since?"uptime "+hms(Date.now()-Date.parse(en.since)):"uptime 00:00:00";
   // lights
   const beat=en.beatAgeMs,age=en.dataAgeMs;
@@ -837,7 +842,7 @@ function renderHud(st){
   $("#hsDay").textContent=usd(day);$("#hsDay").className="v "+sgnCls(day);$("#hsDayX").textContent=`${pf.todayTrades||0} trades · ${on?m:(st.view||"paper")}`;
   const ev=(st.events||[]).slice(-4).reverse();
   $("#hudFeed").innerHTML=ev.length?ev.map(x=>`<div><span class="t">${esc(x.at.slice(11,19))}Z</span>${esc(x.msg)}</div>`).join(""):`<div><span class="t">--:--:--</span>waiting for start</div>`;
-  const err=st.error||(on&&!en.alive&&!booting?"Engine heartbeat lost. Press Stop, then start again.":"");
+  const err=HUD.err||st.error||(on&&!en.alive&&!booting?"Engine heartbeat lost. Press Stop, then start again.":"");
   $("#hudErr").hidden=!err;$("#hudErr").textContent=err;
   if(on&&en.alive)HUD.boot=null;
 }
@@ -888,13 +893,21 @@ $("#tpSaveCfg").onclick=act(async()=>{const cfg={};CFG_KEYS.forEach(k=>{const el
   const r=await tapi("config","POST",cfg);fillCfg(r.config);$("#tpCfgMsg").textContent="saved";});
 const boot=(mode,fn)=>async()=>{HUD.boot=mode;if(TP.st)renderHud(TP.st);
   $("#hud").scrollIntoView({behavior:"smooth",block:"start"});
-  await act(fn)();if(!(TP.st&&TP.st.mode!=="off"))HUD.boot=null;if(TP.st)renderHud(TP.st);};
+  HUD.err="";try{await fn();}catch(e){HUD.err="Start failed: "+e.message+" · press Check connection to test the exchanges from the server.";}
+  await tpPull();if(!(TP.st&&TP.st.mode!=="off"))HUD.boot=null;if(TP.st)renderHud(TP.st);};
 $("#tpPaper").onclick=boot("paper",()=>tapi("start","POST",{mode:"paper"}));
 $("#tpLive").onclick=()=>{const c=(TP.st&&TP.st.config)||{};
   const typed=prompt(`REAL MONEY. ${c.leverage}x leverage, $${c.batchUsd} margin per trade, up to ${c.maxTrades} trades, daily loss stop ${c.dailyLossPct}%.\nType LIVE to arm for today's session:`);
   if(typed!=="LIVE"){errBox("#tpErr","not armed (you must type LIVE)");return;}
   boot("live",()=>tapi("start","POST",{mode:"live",confirm:"LIVE"}))();};
-$("#tpStop").onclick=act(()=>tapi("stop","POST",{}));
+$("#tpStop").onclick=act(async()=>{HUD.err="";await tapi("stop","POST",{});});
+$("#hudDiag").onclick=async()=>{const b=$("#hudDiag"),o=$("#hudDiagOut");b.disabled=true;b.textContent="⌁ Checking…";o.hidden=false;
+  o.innerHTML=`<div class="d">Testing Bybit and Binance from the server (up to 30 s)…</div>`;
+  try{const r=await tapi("diagnose");
+    o.innerHTML=r.venues.map(v=>`<div class="d"><b><span class="led ${v.ok?"ok":"bad"}"></span>${v.exchange==="binanceusdm"?"BINANCE FUTURES":"BYBIT"} · ${v.ok?"OK":"FAIL"} · ${v.ms} ms</b>`
+      +(v.ok?`${esc(v.symbol)} · bid ${v.bid} · ask ${v.ask}`:esc(v.error||"unknown error"))+`</div>`).join("");}
+  catch(e){o.innerHTML=`<div class="d">Check failed: ${esc(e.message)}</div>`;}
+  b.disabled=false;b.textContent="⌁ Check connection";};
 
 /* ---------- settings: API keys only ---------- */
 function renderKeys(k){

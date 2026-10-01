@@ -100,6 +100,49 @@ def test_engine_heartbeat_shows_whether_the_agent_is_really_running():
     assert dead["running"] and not dead["alive"]
     assert not stopped["running"] and stopped["since"] is None
 
+
+class BlockedFeed(FakeFeed):
+    async def load_markets(self):
+        raise RuntimeError("403 Forbidden: region blocked")
+
+
+def test_paper_falls_back_to_the_other_exchange_when_one_is_blocked():
+    good = FakeFeed(hz=50)
+    async def go():
+        a = tr.TradeAgent(exchange_factory=lambda ex, creds=None, pro=True: BlockedFeed() if ex == "bybit" else good)
+        a.configure({"exchange": "bybit"})
+        await a.start("paper")
+        await asyncio.sleep(0.4)
+        st = a.status()
+        await a.stop()
+        return st
+    st = run(go())
+    assert st["mode"] == "paper" and st["engine"]["alive"]
+    assert st["config"]["exchange"] == "binanceusdm"
+    assert any("using binanceusdm instead" in e["msg"] for e in st["events"])
+
+
+def test_failed_start_reports_why_and_stays_off():
+    async def go():
+        a = tr.TradeAgent(exchange_factory=lambda ex, creds=None, pro=True: BlockedFeed())
+        try:
+            await a.start("paper")
+        except RuntimeError:
+            pass
+        return a.status()
+    st = run(go())
+    assert st["mode"] == "off" and "region blocked" in st["error"]
+
+
+def test_diagnose_reports_each_venue():
+    class Book(FakeFeed):
+        async def fetch_order_book(self, sym, limit):
+            return {"bids": [[100.0, 1]], "asks": [[100.02, 1]]}
+    r = run(tr.diagnose(lambda ex, creds=None, pro=True: Book() if ex == "binanceusdm" else BlockedFeed()))
+    by = {v["exchange"]: v for v in r}
+    assert by["binanceusdm"]["ok"] and by["binanceusdm"]["symbol"] == "PLTR/USDT:USDT"
+    assert not by["bybit"]["ok"] and "region blocked" in by["bybit"]["error"]
+
 # ------------------------------------------------------------------ strategy
 def _range(strat, lo=99.9, hi=100.1):
     for i, m in enumerate([lo, hi] * 30):

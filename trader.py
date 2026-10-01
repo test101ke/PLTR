@@ -483,6 +483,39 @@ def make_exchange(exchange_id, creds=None, pro=True):
     return getattr(mod, exchange_id)(opts)
 
 
+async def diagnose(exchange_factory=None):
+    """From this server: can each venue be reached, is PLTR listed, is the book live? For the HUD."""
+    factory = exchange_factory or make_exchange
+    out = []
+    for venue in FEES:
+        r, t0, ex = {"exchange": venue}, time.monotonic(), None
+        try:
+            ex = factory(venue, None, pro=False)
+            await asyncio.wait_for(ex.load_markets(), 25)
+            sym = find_symbol(ex.markets)
+            r["symbol"] = sym
+            if sym:
+                ob = await asyncio.wait_for(ex.fetch_order_book(sym, 5), 10)
+                r["bid"] = (ob.get("bids") or [[None]])[0][0]
+                r["ask"] = (ob.get("asks") or [[None]])[0][0]
+                r["ok"] = bool(r["bid"] and r["ask"])
+                if not r["ok"]:
+                    r["error"] = "order book empty"
+            else:
+                r["ok"], r["error"] = False, "no PLTR USDT perpetual listed"
+        except Exception as e:
+            r["ok"], r["error"] = False, f"{type(e).__name__}: {str(e)[:160]}"
+        finally:
+            if ex is not None:
+                try:
+                    await ex.close()
+                except Exception:
+                    pass
+        r["ms"] = round((time.monotonic() - t0) * 1000)
+        out.append(r)
+    return out
+
+
 def find_symbol(markets, wanted=""):
     """The PLTR USDT perpetual. This desk trades PLTR only: any other symbol is refused."""
     if wanted:
@@ -594,9 +627,35 @@ class TradeAgent:
             exchange_id = self.keys.creds["exchange"]
             self.cfg["exchange"] = exchange_id          # fees follow the exchange actually traded
         self.error = None
+        # paper can watch either venue: if the chosen one is blocked or has no PLTR perp, try the other
+        venues = [exchange_id] if mode == "live" else [exchange_id] + [v for v in FEES if v != exchange_id]
+        problems = []
+        for venue in venues:
+            try:
+                await self._connect(mode, venue)
+                exchange_id = venue
+                break
+            except Exception as e:
+                problems.append(str(e))
+        else:
+            self.error = f"could not start {mode}: " + " | ".join(problems)
+            raise RuntimeError(" | ".join(problems))
+        if exchange_id != self.cfg["exchange"]:
+            self._event(f"{self.cfg['exchange']} unavailable ({problems[0][:90]}); using {exchange_id} instead")
+            self.cfg["exchange"] = exchange_id
+        if mode == "live":
+            self.live_armed_day = dt.datetime.now(NY).date()
+        self.strategy = OrbStrategy(self.cfg, self.equity)
+        self.mode, self.started_at, self.beat = mode, _iso(), None
+        self._event(f"started {mode} on {exchange_id} {self.symbol}, equity {self.equity:.2f} USDT, "
+                    f"{self.cfg['leverage']}x")
+        self.task = asyncio.create_task(self._run())
+        return self.status()
+
+    async def _connect(self, mode, exchange_id):
         try:
             self.feed_ex = self.exchange_factory(exchange_id, None, pro=True)
-            await self.feed_ex.load_markets()
+            await asyncio.wait_for(self.feed_ex.load_markets(), 25)
             self.symbol = find_symbol(self.feed_ex.markets, self.cfg["symbol"])
             if not self.symbol:
                 raise RuntimeError(f"no PLTR USDT perpetual found on {exchange_id}")
@@ -617,14 +676,6 @@ class TradeAgent:
             self.broker = self.feed_ex = None
             msg = str(e) if isinstance(e, RuntimeError) else f"could not reach {exchange_id} ({type(e).__name__}): {str(e)[:140]}"
             raise RuntimeError(msg) from None
-        if mode == "live":
-            self.live_armed_day = dt.datetime.now(NY).date()
-        self.strategy = OrbStrategy(self.cfg, self.equity)
-        self.mode, self.started_at, self.beat = mode, _iso(), None
-        self._event(f"started {mode} on {exchange_id} {self.symbol}, equity {self.equity:.2f} USDT, "
-                    f"{self.cfg['leverage']}x")
-        self.task = asyncio.create_task(self._run())
-        return self.status()
 
     async def stop(self, reason="stopped by user"):
         """Kill switch: flatten, cancel, shut the stream."""

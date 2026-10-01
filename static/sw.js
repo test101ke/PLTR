@@ -1,7 +1,7 @@
 /* PLTR Signal Desk service worker.
    Shell is cached so the app opens instantly offline; every /api/ call is
    network-only, because stale market data is worse than no market data. */
-const V = 'pltr-desk-v6';
+const V = 'pltr-desk-v7';
 const SHELL = ['/static/manifest.webmanifest', '/static/icons/icon-192.png', '/static/icons/icon-512.png'];
 
 self.addEventListener('install', e => {
