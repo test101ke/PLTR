@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "today | optimize | all"
+        description: "today | optimize | all | feeds (paper agent on public data, no keys)"
         default: "all"
       trials:
         description: "Settings to try"
@@ -32,6 +32,7 @@ jobs:
           TICK_DAYS: ${{ github.event.inputs.tick_days || '60' }}
         run: |
           set -o pipefail
+          if [ "${{ github.event.inputs.mode }}" = "feeds" ]; then python feed_check.py 20 2>&1 | tee session.txt; exit $?; fi
           python session_backtest.py ${{ github.event.inputs.mode || 'all' }} 2>&1 | tee session.txt
       - uses: actions/upload-artifact@v4
         if: always()
