@@ -626,7 +626,7 @@ a.navlink{font-size:13px;font-weight:600;color:var(--accent);text-decoration:non
         <button class="hb" type="button" id="hudDiag">⌁ Check connection</button>
         <button class="hb hb-stop" type="button" id="tpStop">■ Stop &amp; flatten</button>
       </div>
-      <p class="hud-note">Green lights = the agent is really working: engine heartbeat under 1.5 s and market data under 3 s old. Paper uses the live order book with simulated fills and fees. Live sends real orders and must be armed each day.</p>
+      <p class="hud-note">Green lights = the agent is really working: engine heartbeat under 1.5 s and market data under 3 s old. Paper needs no API keys: it reads the public order book (Bybit first, then Binance, Bitget, OKX, Gate if one is blocked) and simulates fills with 0.06% fees. Live sends real orders and must be armed each day.</p>
     </section>
 
     <section class="card">
@@ -675,7 +675,7 @@ a.navlink{font-size:13px;font-weight:600;color:var(--accent);text-decoration:non
           <label>Fee per side % (-1 = 0.06%)<input id="c-takerFeePct" type="number" min="-1" max="1" step="0.01"></label>
           <label>Book checks per second<input id="c-tickHz" type="number" min="5" max="20" step="1"></label>
           <label>Max orders per second<input id="c-maxOrdersPerSec" type="number" min="1" max="20" step="1"></label>
-          <label>Paper market data<select id="c-exchange"><option value="bybit">Bybit</option><option value="binanceusdm">Binance futures</option></select></label>
+          <label>Paper market data (public, no keys)<select id="c-exchange"><option value="bybit">Bybit</option><option value="binanceusdm">Binance futures</option><option value="bitget">Bitget</option><option value="okx">OKX</option><option value="gate">Gate</option></select></label>
         </div>
         <div class="row" style="margin-top:9px"><button class="b" type="button" id="tpSaveCfg">Save</button><span class="msg" id="tpCfgMsg"></span></div>
       </details>
@@ -781,6 +781,7 @@ function renderTrade(st){
 }
 /* ---------- mission control HUD ---------- */
 const HUD={mids:[],boot:null};
+const VNAME=v=>({bybit:"BYBIT",binanceusdm:"BINANCE",bitget:"BITGET",okx:"OKX",gate:"GATE"})[v]||String(v||"").toUpperCase();
 const pad2=n=>String(n).padStart(2,"0");
 const hms=ms=>{ms=Math.max(0,Math.floor(ms/1000));return `${pad2(Math.floor(ms/3600))}:${pad2(Math.floor(ms/60)%60)}:${pad2(ms%60)}`;};
 const EAT_MS=3*3600e3;
@@ -795,7 +796,7 @@ function renderHud(st){
   H.className="hud "+(on?`is-${m} is-on`:(booting?`is-${HUD.boot} is-boot`:"is-off"));
   const e=new Date(Date.now()+EAT_MS);
   $("#hudClock").textContent=`${pad2(e.getUTCHours())}:${pad2(e.getUTCMinutes())}:${pad2(e.getUTCSeconds())} EAT`;
-  $("#hudVenue").textContent=on?`${c.exchange==="binanceusdm"?"BINANCE":"BYBIT"} · ${st.symbol||""}`:"no feed";
+  $("#hudVenue").textContent=on?`${VNAME(c.exchange)} · public feed · ${st.symbol||""}`:"no feed";
   $("#hudMode").textContent=booting?"BOOTING":on?(m==="live"?"LIVE":"PAPER"):"STANDBY";
   $("#hudSub").textContent=booting?"connecting to exchange":on?(en.alive?(m==="live"?"real orders · armed":"sim fills · live data"):"engine not responding"):"offline · press start";
   $("#hudUp").textContent=on&&en.since?"uptime "+hms(Date.now()-Date.parse(en.since)):"uptime 00:00:00";
@@ -902,9 +903,9 @@ $("#tpLive").onclick=()=>{const c=(TP.st&&TP.st.config)||{};
   boot("live",()=>tapi("start","POST",{mode:"live",confirm:"LIVE"}))();};
 $("#tpStop").onclick=act(async()=>{HUD.err="";await tapi("stop","POST",{});});
 $("#hudDiag").onclick=async()=>{const b=$("#hudDiag"),o=$("#hudDiagOut");b.disabled=true;b.textContent="⌁ Checking…";o.hidden=false;
-  o.innerHTML=`<div class="d">Testing Bybit and Binance from the server (up to 30 s)…</div>`;
+  o.innerHTML=`<div class="d">Testing 5 public exchange feeds from the server (up to 35 s)…</div>`;
   try{const r=await tapi("diagnose");
-    o.innerHTML=r.venues.map(v=>`<div class="d"><b><span class="led ${v.ok?"ok":"bad"}"></span>${v.exchange==="binanceusdm"?"BINANCE FUTURES":"BYBIT"} · ${v.ok?"OK":"FAIL"} · ${v.ms} ms</b>`
+    o.innerHTML=r.venues.map(v=>`<div class="d"><b><span class="led ${v.ok?"ok":"bad"}"></span>${VNAME(v.exchange)} · ${v.ok?"OK":"FAIL"} · ${v.ms} ms</b>`
       +(v.ok?`${esc(v.symbol)} · bid ${v.bid} · ask ${v.ask}`:esc(v.error||"unknown error"))+`</div>`).join("");}
   catch(e){o.innerHTML=`<div class="d">Check failed: ${esc(e.message)}</div>`;}
   b.disabled=false;b.textContent="⌁ Check connection";};

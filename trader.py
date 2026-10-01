@@ -146,10 +146,15 @@ def clean_config(cfg, base=None):
     return out
 
 
+# Paper trading reads PUBLIC market data only (no API keys). Tried in this order after the
+# chosen venue, so a blocked exchange or a missing PLTR listing never leaves the agent offline.
+PUBLIC_FEEDS = ("bybit", "binanceusdm", "bitget", "okx", "gate")
+
+
 def fee_pct(cfg):
     """Fee per side. -1 means 'use this exchange's rate from FEES'."""
     f = cfg.get("takerFeePct", -1)
-    return FEES.get(cfg.get("exchange"), 0.05) if f is None or f < 0 else f
+    return FEES.get(cfg.get("exchange"), 0.06) if f is None or f < 0 else f
 
 
 # ------------------------------------------------------------------ rate limit
@@ -484,10 +489,10 @@ def make_exchange(exchange_id, creds=None, pro=True):
 
 
 async def diagnose(exchange_factory=None):
-    """From this server: can each venue be reached, is PLTR listed, is the book live? For the HUD."""
+    """From this server, PUBLIC data only: is each venue reachable, PLTR listed, the book live?"""
     factory = exchange_factory or make_exchange
-    out = []
-    for venue in FEES:
+
+    async def one(venue):
         r, t0, ex = {"exchange": venue}, time.monotonic(), None
         try:
             ex = factory(venue, None, pro=False)
@@ -512,8 +517,9 @@ async def diagnose(exchange_factory=None):
                 except Exception:
                     pass
         r["ms"] = round((time.monotonic() - t0) * 1000)
-        out.append(r)
-    return out
+        return r
+
+    return list(await asyncio.gather(*(one(v) for v in PUBLIC_FEEDS)))
 
 
 def find_symbol(markets, wanted=""):
@@ -628,7 +634,7 @@ class TradeAgent:
             self.cfg["exchange"] = exchange_id          # fees follow the exchange actually traded
         self.error = None
         # paper can watch either venue: if the chosen one is blocked or has no PLTR perp, try the other
-        venues = [exchange_id] if mode == "live" else [exchange_id] + [v for v in FEES if v != exchange_id]
+        venues = [exchange_id] if mode == "live" else [exchange_id] + [v for v in PUBLIC_FEEDS if v != exchange_id]
         problems = []
         for venue in venues:
             try:
