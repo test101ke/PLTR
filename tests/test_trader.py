@@ -82,6 +82,24 @@ def test_checks_per_second_between_5_and_20():
     assert 4.5 <= s["checksPerSec"] <= 6, s             # quiet feed: still >= 5 checks a second
 
 
+
+def test_engine_heartbeat_shows_whether_the_agent_is_really_running():
+    async def go():
+        a = _agent(FakeFeed(hz=50))
+        off = a.status()["engine"]
+        await a.start("paper")
+        await asyncio.sleep(0.5)
+        on = a.status()["engine"]
+        a.task.cancel(); await asyncio.sleep(0.05)     # loop dies but mode still says paper
+        dead = a.status()["engine"]
+        await a.stop()
+        return off, on, dead, a.status()["engine"]
+    off, on, dead, stopped = run(go())
+    assert not off["running"] and not off["alive"]
+    assert on["running"] and on["alive"] and on["beatAgeMs"] < 1000 and on["dataAgeMs"] < 1000 and on["since"]
+    assert dead["running"] and not dead["alive"]
+    assert not stopped["running"] and stopped["since"] is None
+
 # ------------------------------------------------------------------ strategy
 def _range(strat, lo=99.9, hi=100.1):
     for i, m in enumerate([lo, hi] * 30):
