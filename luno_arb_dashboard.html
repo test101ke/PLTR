@@ -1,0 +1,172 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Luno Arb Scanner</title>
+<!-- Double-click this file to open it in your browser. No install, no login, read-only. -->
+<style>
+:root{--bg:#f6f7f5;--panel:#fff;--fg:#17201b;--mute:#5d6b63;--line:#dfe4e0;--accent:#0b6e4f;--good:#13804a;--bad:#b3261e;--warn:#9a6a00;color-scheme:light}
+@media (prefers-color-scheme:dark){:root{--bg:#101512;--panel:#18201b;--fg:#e6ece8;--mute:#93a29a;--line:#2a352f;--accent:#45c495;--good:#4cc77f;--bad:#ef6b62;--warn:#e0b44a;color-scheme:dark}}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 system-ui,-apple-system,Segoe UI,sans-serif}
+.wrap{max-width:1200px;margin:0 auto;padding-inline:16px;padding-block:20px 40px;display:grid;gap:18px}
+header{display:flex;flex-wrap:wrap;gap:12px;align-items:end;justify-content:space-between}
+h1{margin:0;font-size:22px}h2{margin:0 0 10px;font-size:15px;text-transform:uppercase;letter-spacing:.06em;color:var(--mute)}
+.controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+label{color:var(--mute);font-size:13px}input,select,button,textarea{font:inherit;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--fg)}
+button{cursor:pointer;background:var(--accent);color:#fff;border-color:var(--accent)}
+textarea{width:100%;box-sizing:border-box;min-height:90px;font-family:ui-monospace,Consolas,monospace;font-size:12px}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px}
+.tile{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px}.tile b{display:block;font-size:22px;font-variant-numeric:tabular-nums}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px;min-width:0}
+.scroll{overflow-x:auto}table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}
+th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);white-space:nowrap}th{color:var(--mute);font-weight:600;font-size:12px}
+.pos{color:var(--good);font-weight:700}.neg{color:var(--bad)}.warn{color:var(--warn)}.mute{color:var(--mute)}
+.pill{display:inline-block;padding:1px 8px;border-radius:99px;font-size:12px;border:1px solid currentColor}
+.legs{font-size:12px;color:var(--mute)}.err{color:var(--bad);font-weight:600}
+ol{margin:6px 0 10px;padding-left:20px}a{color:var(--accent)}
+</style></head><body><div class="wrap">
+<header><div><h1>Luno Arb Scanner</h1><div class="mute" id="status">Loading…</div></div>
+<div class="controls">
+<label for="fee">Fee per trade %</label><input id="fee" type="number" step="0.01" value="0.10" style="width:80px">
+<label for="every">Refresh</label><select id="every"><option value="0">Manual</option><option value="10" selected>10s</option><option value="30">30s</option><option value="60">60s</option></select>
+<label><input id="onlyPos" type="checkbox"> Profitable only</label>
+<button id="go">Scan now</button></div></header>
+
+<section class="panel" id="pastePanel" hidden>
+<h2>Live fetch blocked: use paste mode</h2>
+<div>Your browser blocked this page from reading Luno directly. Do this instead (takes 10 seconds):</div>
+<ol>
+<li>Open <a href="https://api.luno.com/api/1/tickers" target="_blank" rel="noopener">https://api.luno.com/api/1/tickers</a> in a new tab.</li>
+<li>Select all (Ctrl+A / Cmd+A), copy, and paste below.</li>
+<li>Click <b>Scan pasted data</b>. Repeat to refresh prices.</li>
+</ol>
+<textarea id="paste" placeholder='{"tickers":[...]}'></textarea>
+<div style="margin-top:8px"><button id="scanPaste">Scan pasted data</button></div>
+</section>
+
+<div class="tiles"><div class="tile"><span class="mute">Pairs</span><b id="tPairs">–</b></div><div class="tile"><span class="mute">Loops checked</span><b id="tLoops">–</b></div>
+<div class="tile"><span class="mute">Profitable after fees</span><b id="tPos">–</b></div><div class="tile"><span class="mute">Best loop</span><b id="tBest">–</b></div></div>
+<section class="panel"><h2>Triangular loops (best first)</h2><div class="scroll"><table id="loops"></table></div>
+<p class="mute" style="font-size:12px">Net % = result of a 1 unit round trip at best bid/ask, minus your fee on each of the 3 trades. Max size = largest starting amount that fills all 3 trades at the best price (live mode, top 15 loops only). "moved" = price changed between the ticker and order book fetch.</p></section>
+<section class="panel"><h2>All pairs</h2><div class="scroll"><table id="pairs"></table></div></section>
+</div>
+<script>
+const API = 'https://api.luno.com';
+const DEPTH_CHECK = 15;
+// Used only in paste mode, to split a pair name like "ETHZAR" into ETH / ZAR.
+const QUOTES = ['USDC','USDT','XBT','ETH','ZAR','EUR','GBP','USD','NGN','UGX','MYR','IDR','KES','ZMW','BWP','AUD','SGD','BTC'];
+const $ = id => document.getElementById(id);
+const f = (n, d = 8) => n == null ? '–' : (+n).toLocaleString(undefined, {maximumFractionDigits: d});
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let timer, mode = 'live';
+
+async function get(path) {
+  const r = await fetch(API + path);
+  if (!r.ok) throw new Error('HTTP ' + r.status + ' on ' + path);
+  return r.json();
+}
+
+function splitPair(p) {
+  for (const q of QUOTES) if (p.endsWith(q) && p.length > q.length) return [p.slice(0, -q.length), q];
+  return null;
+}
+
+function build(tickers, markets, fee) {
+  const now = Date.now(), pairs = [], edges = new Map();
+  for (const t of tickers) {
+    let base, counter, minVol = null, mActive = true;
+    if (markets) {
+      const m = markets[t.pair]; if (!m) continue;
+      base = m.base_currency; counter = m.counter_currency; minVol = m.min_volume; mActive = m.trading_status === 'ACTIVE';
+    } else {
+      const s = splitPair(t.pair); if (!s) continue; [base, counter] = s;
+    }
+    const bid = +t.bid || 0, ask = +t.ask || 0;
+    const active = t.status === 'ACTIVE' && mActive;
+    pairs.push({pair: t.pair, bid, ask, active, minVol,
+      spread: bid > 0 && ask > 0 ? (ask - bid) / ask * 100 : null,
+      vol24: +t.rolling_24_hour_volume || 0,
+      age: t.timestamp ? Math.round((now - +t.timestamp) / 1000) : null});
+    if (!active || bid <= 0 || ask <= 0) continue;
+    edges.set(base + '>' + counter, {pair: t.pair, side: 'SELL', price: bid, rate: bid * (1 - fee), minVol, frm: base, to: counter});
+    edges.set(counter + '>' + base, {pair: t.pair, side: 'BUY', price: ask, rate: (1 / ask) * (1 - fee), minVol, frm: counter, to: base});
+  }
+  const ccys = [...new Set([...edges.values()].map(e => e.frm))].sort();
+  const seen = new Set(), loops = [];
+  for (const a of ccys) for (const b of ccys) for (const c of ccys) {
+    if (a === b || b === c || a === c) continue;
+    const e1 = edges.get(a+'>'+b), e2 = edges.get(b+'>'+c), e3 = edges.get(c+'>'+a);
+    if (!e1 || !e2 || !e3) continue;
+    const key = [a+'>'+b, b+'>'+c, c+'>'+a].sort().join('|'); // same loop, other start point
+    if (seen.has(key)) continue; seen.add(key);
+    loops.push({path: [a, b, c, a], legs: [{...e1}, {...e2}, {...e3}], net: (e1.rate * e2.rate * e3.rate - 1) * 100});
+  }
+  loops.sort((x, y) => y.net - x.net);
+  pairs.sort((x, y) => x.pair.localeCompare(y.pair));
+  return {pairs, loops, ccys};
+}
+
+async function depthCheck(lp) {
+  try {
+    let maxStart = Infinity, mult = 1;
+    for (const leg of lp.legs) {
+      const ob = await get('/api/1/orderbook_top?pair=' + leg.pair);
+      const top = leg.side === 'SELL' ? ob.bids[0] : ob.asks[0];
+      const capIn = leg.side === 'SELL' ? +top.volume : +top.volume * +top.price;
+      leg.moved = Math.abs(+top.price - leg.price) > 1e-12;
+      maxStart = Math.min(maxStart, capIn / mult);
+      mult *= leg.rate;
+    }
+    lp.maxStart = maxStart; lp.depthOk = true;
+  } catch (e) { lp.depthOk = false; lp.depthErr = e.message; }
+}
+
+function render(d, fee, label) {
+  const pos = d.loops.filter(l => l.net > 0);
+  $('tPairs').textContent = d.pairs.length; $('tLoops').textContent = d.loops.length; $('tPos').textContent = pos.length;
+  const best = d.loops[0];
+  $('tBest').textContent = best ? (best.net > 0 ? '+' : '') + best.net.toFixed(3) + '%' : 'none';
+  $('tBest').className = best && best.net > 0 ? 'pos' : 'neg';
+  const shown = ($('onlyPos').checked ? pos : d.loops).slice(0, 60);
+  $('loops').innerHTML = '<tr><th>Net %</th><th>Route</th><th>Trades to place</th><th>Max size (start ccy)</th><th>Book check</th></tr>' +
+    (shown.length ? shown.map(l => {
+      const legs = l.legs.map((g, i) => `${i+1}. ${g.side} ${esc(g.pair)} @ ${f(g.price)}${g.minVol ? ` <span class="mute">(min ${esc(g.minVol)})</span>` : ''}${g.moved ? ' <span class="warn">moved</span>' : ''}`).join('<br>');
+      const book = l.depthOk === undefined ? '<span class="mute">not checked</span>' : l.depthOk ? '<span class="pill pos">ok</span>' : `<span class="err">${esc(l.depthErr)}</span>`;
+      return `<tr><td class="${l.net > 0 ? 'pos' : 'neg'}">${l.net > 0 ? '+' : ''}${l.net.toFixed(3)}%</td><td>${l.path.map(esc).join(' → ')}</td><td class="legs">${legs}</td><td>${l.maxStart != null ? f(l.maxStart) + ' ' + esc(l.path[0]) : '–'}</td><td>${book}</td></tr>`;
+    }).join('') : '<tr><td colspan="5" class="mute">No loops match.</td></tr>');
+  $('pairs').innerHTML = '<tr><th>Pair</th><th>Bid</th><th>Ask</th><th>Spread %</th><th>24h vol</th><th>Min order</th><th>Status</th><th>Price age</th></tr>' +
+    d.pairs.map(p => `<tr><td>${esc(p.pair)}</td><td>${f(p.bid)}</td><td>${f(p.ask)}</td><td>${p.spread == null ? '–' : p.spread.toFixed(3)}</td><td>${f(p.vol24, 4)}</td><td>${p.minVol ? esc(p.minVol) : '–'}</td><td>${p.active ? '<span class="pill pos">active</span>' : '<span class="pill neg">inactive</span>'}</td><td class="${p.age > 60 ? 'warn' : ''}">${p.age == null ? '–' : p.age + 's'}</td></tr>`).join('');
+  $('status').textContent = `${label} ${new Date().toLocaleTimeString()} · fee ${(fee * 100).toFixed(2)}% per trade · currencies: ${d.ccys.join(', ')}`;
+}
+
+const feeVal = () => (parseFloat($('fee').value) || 0) / 100;
+
+async function scanLive() {
+  $('status').textContent = 'Scanning…';
+  const fee = feeVal();
+  try {
+    const [m, t] = await Promise.all([get('/api/exchange/1/markets'), get('/api/1/tickers')]);
+    const markets = Object.fromEntries(m.markets.map(x => [x.market_id, x]));
+    const d = build(t.tickers, markets, fee);
+    for (const lp of d.loops.slice(0, DEPTH_CHECK)) await depthCheck(lp);
+    render(d, fee, 'Live data, updated');
+  } catch (e) {
+    // Most likely the browser blocked the cross-site request. Switch to paste mode.
+    mode = 'paste'; clearInterval(timer); $('pastePanel').hidden = false; $('every').value = '0';
+    $('status').innerHTML = '<span class="err">Live fetch failed (' + esc(e.message) + '). Use paste mode below.</span>';
+  }
+}
+
+function scanPaste() {
+  const fee = feeVal();
+  try {
+    const t = JSON.parse($('paste').value.trim());
+    if (!t.tickers) throw new Error('No "tickers" field. Copy the whole page.');
+    render(build(t.tickers, null, fee), fee, 'Pasted data, scanned');
+  } catch (e) { $('status').innerHTML = '<span class="err">Could not read pasted data: ' + esc(e.message) + '</span>'; }
+}
+
+const scan = () => mode === 'live' ? scanLive() : scanPaste();
+function sched() { clearInterval(timer); const s = +$('every').value; if (s && mode === 'live') timer = setInterval(scanLive, s * 1000); }
+$('go').onclick = scan; $('scanPaste').onclick = scanPaste; $('every').onchange = sched; $('onlyPos').onchange = scan;
+scanLive(); sched();
+</script>
+</body></html>
