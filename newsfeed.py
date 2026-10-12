@@ -157,7 +157,7 @@ def merge(items, limit=30, now_ms=None):
     now_ms = now_ms or int(time.time() * 1000)
     merged = []
     for it in sorted(items, key=lambda x: x.get("ts") or 0, reverse=True):
-        if not _norm(it.get("headline")):
+        if not _norm(it.get("headline")) or not is_relevant(it):
             continue
         dup = next((m for m in merged if m["kind"] == it.get("kind", "news")
                     and same_story(m["headline"], it["headline"])), None)
@@ -191,17 +191,40 @@ async def fetch_all(client):
 # Whole words only. Substring matching used to read "against" as "gain",
 # "window" as "win", "execute" as "cut" and "shortly" as "short".
 POS = re.compile(r"\b(beats?|surg\w*|soar\w*|rall(?:y|ies|ied)|record|upgrad\w*|rais(?:e|es|ed|ing)"
-                 r"|bullish|gains?|gained|jump\w*|contracts?|wins?|won|award\w*|partnerships?|expand\w*"
-                 r"|growth|outperform\w*|strong(?:er)?|tops|buyback)\b")
+                 r"|ris(?:e|es|ing)|rose|climb\w*|bullish|gains?|gained|jump\w*|contracts?|wins?|won|award\w*"
+                 r"|partnerships?|expand\w*|growth|outperform\w*|strong(?:er)?|tops|buyback|upside"
+                 r"|turns? buy|buy rating|target hike|on a tear|all-time high|record high)\b")
 NEG = re.compile(r"\b(miss(?:es|ed)?|fall\w*|fell|drops?|dropped|slid\w*|slump\w*|plung\w*|downgrad\w*"
                  r"|cuts?|bearish|loss(?:es)?|lawsuits?|probe\w*|investigat\w*|warn\w*|weak\w*"
-                 r"|overvalued|short sellers?|short report|sell-?off|declin\w*|tumbl\w*|sink\w*|sank)\b")
+                 r"|overvalued|short sellers?|short report|sell-?off|declin\w*|tumbl\w*|sink\w*|sank"
+                 r"|underperform\w*|downside|sell rating|turns? sell|slash\w*|tank\w*|crash\w*|retreat\w*)\b")
+# Analyst actions and results move the stock more than adjectives: they count double.
+STRONG = re.compile(r"^(upgrad|downgrad|beat|miss|turns? (?:buy|sell)|buy rating|sell rating)")
+SUBJECT = re.compile(r"\b(palantir|pltr|karp)\b", re.I)
+# "Palantir gains on bullish call, NXP tumbles" / "Palantir rising while tech stocks fall":
+# only the clauses about Palantir decide the direction.
+CLAUSE = re.compile(r",|;|\bwhile\b|\bbut\b|\bas\b(?= \w+ (?:stocks?|shares?)\b)|\bwhereas\b", re.I)
+
+
+def _weight(words):
+    return sum(2 if STRONG.match(w) else 1 for w in words)
 
 
 def keyword_dir(text):
     t = (text or "").lower()
-    p, n = len(POS.findall(t)), len(NEG.findall(t))
+    parts = [c for c in CLAUSE.split(t) if c.strip()]
+    about = [c for c in parts if SUBJECT.search(c)]
+    t = " ".join(about) if about and len(about) < len(parts) else t
+    p, n = _weight(POS.findall(t)), _weight(NEG.findall(t))
     return "up" if p > n else "down" if n > p else "flat"
+
+
+def is_relevant(it):
+    """Headlines must be about Palantir. Feeds keyed on the ticker still carry wire
+    junk (divorce lawyers, Halloween promos, other companies' earnings)."""
+    if it.get("kind", "news") != "news" or it.get("src") == "SEC EDGAR":
+        return True
+    return bool(SUBJECT.search(it.get("headline") or ""))
 
 
 def score(items, now_ms=None, half_life_h=6.0):

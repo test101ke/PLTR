@@ -60,3 +60,28 @@ if __name__ == "__main__":
             except AssertionError as e:
                 fails += 1; print("FAIL", name, "-", e)
     sys.exit(1 if fails else 0)
+
+
+def test_direction_reads_real_headlines_about_palantir_only():
+    # real headlines from 8 Oct 2026; the old rules got the first six wrong
+    cases = [("Palantir Stock Rises as Goldman Turns Buy With $230 Target", "up"),
+             ("Palantir Stocks Rise With Ives's 2027 AI Endorsement", "up"),
+             ("Why Is Palantir Stock Rising Today While Tech Stocks Fall? (October 8)", "up"),
+             ("Premarket movers: Palantir gains on bullish call, NXP tumbles on downgrade", "up"),
+             ("Palantir has been on a tear. Goldman Sachs sees more momentum ahead", "up"),
+             ("Palantir in focus as Goldman Sachs upgrades on recent underperformance (PLTR:NASDAQ)", "up"),
+             ("Palantir falls after Morgan Stanley downgrade", "down"),
+             ("Palantir misses revenue estimates, shares sink", "down"),
+             ("What Is Going on With Palantir Tech Stock on Thursday?", "flat")]
+    for h, want in cases:
+        assert nf.keyword_dir(h) == want, h
+
+
+def test_off_topic_wire_items_are_dropped():
+    items = [{"headline": "Bronx Divorce Mediation Attorney Explains How to Divide a Business", "src": "Nasdaq", "ts": 2},
+             {"headline": "PepsiCo Tops Q3 Estimates As International Growth Accelerates", "src": "Yahoo Finance", "ts": 3},
+             {"headline": "Goldman Sachs upgrades Palantir to Buy", "src": "Yahoo Finance", "ts": 4},
+             {"headline": "8-K current report", "src": "SEC EDGAR", "ts": 1},
+             {"headline": "$PLTR to the moon", "src": "StockTwits @x", "ts": 5, "kind": "social"}]
+    heads = [m["headline"] for m in nf.merge(items, now_ms=10)]
+    assert heads == ["Goldman Sachs upgrades Palantir to Buy", "8-K current report", "$PLTR to the moon"]

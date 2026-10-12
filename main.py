@@ -1450,6 +1450,13 @@ async def trade_start(request: Request):
     return _json(st)
 
 
+@app.get("/api/trade/diagnose")
+async def trade_diagnose(request: Request):
+    """Tests Bybit and Binance from this server: reachable, PLTR listed, live order book."""
+    signed_in(request)
+    return {"at": dt.datetime.now(dt.timezone.utc).isoformat(), "venues": await trader_mod.diagnose()}
+
+
 @app.post("/api/trade/stop")
 async def trade_stop(request: Request):
     name = signed_in(request)
